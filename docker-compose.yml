@@ -1,36 +1,41 @@
-version: '3.8'
-
 services:
-  # 1. Backend Service (API)
   api:
     build:
       context: .
       dockerfile: server/Dockerfile
     container_name: jewelry_api
     restart: always
-    ports:
-      # Map internal 3001 to the host port 3001 (Useful for debugging)
-      - "3001:3001" 
-    volumes:
-      # CRITICAL: Maps the container's internal DB path to a persistent Docker Volume
-      - db_data:/usr/src/app/
 
-  # 2. Frontend Service (React UI/Nginx)
+    env_file:
+      - ./.env
+
+    ports:
+      - "3001:3001"
+
+    # Mount only the DB directory, NOT the whole project
+    volumes:
+      - db_data:/usr/src/app/data
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/api/orders"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+
   frontend:
     build:
       context: .
       dockerfile: Dockerfile
-      # Inject the API URL during the build for the React app to use
       args:
         - VITE_API_BASE_URL=http://api:3001
     container_name: jewelry_frontend
     restart: always
-    depends_on:
-      - api # Ensure the API starts before the frontend tries to connect
     ports:
-      # Map internal port 80 to the host's public port 80 (standard access)
       - "80:80"
+    depends_on:
+      api:
+        condition: service_healthy
 
 volumes:
-  # Define the named volume for persistent storage of the SQLite database
   db_data:

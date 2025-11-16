@@ -2,13 +2,65 @@ import express from "express"
 import sqlite3 from "sqlite3"
 import cors from "cors"
 import process from "process"
+import path, { dirname } from "path"
+import fs from "fs"
+import { fileURLToPath } from "url"
+
+// ES MODULE FIX FOR __dirname
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
+
+// --- ADDED S3 AND MULTER IMPORTS ---
+import { S3Client } from '@aws-sdk/client-s3'; 
+import multer from 'multer';
+import multerS3 from 'multer-s3';
 
 const sqlite = sqlite3.verbose();
-
 const app = express();
 const PORT = 3001;
 
-// --- CONFIGURATION & MIDDLEWARE ---
+// ----- CREATE DB DIRECTORY IF NOT EXISTS -----
+// Create persistent DB directory
+const dbDir = path.join(__dirname, "data");
+if (!fs.existsSync(dbDir)) {
+    fs.mkdirSync(dbDir, { recursive: true });
+}
+
+// Full path to database file
+const dbPath = path.join(dbDir, "jewelry_orders.db");
+
+
+// --- AWS CONFIGURATION ---
+const s3 = new S3Client({
+    region: process.env.AWS_REGION,
+    credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    }
+});
+
+const upload = multer({
+    storage: multerS3({
+        s3: s3,
+        bucket: process.env.S3_BUCKET_NAME,
+        acl: "public-read",
+        contentType: multerS3.AUTO_CONTENT_TYPE,   // ⭐ FIXES THE DOWNLOAD ISSUE
+        metadata: function (req, file, cb) {
+            cb(null, { fieldName: file.fieldname });
+        },
+        key: function (req, file, cb) {
+            const safeName = file.originalname
+                .normalize("NFKD")
+                .replace(/[^\w.\-]+/g, "_");
+
+            const filename = `orders/${Date.now()}-${safeName}`;
+            cb(null, filename);
+        }
+    })
+});
+
+
+// --- CONFIGURATION ---
 app.use(cors());
 app.use(express.json());
 
@@ -19,13 +71,13 @@ const handleServerError = (res, error, message = "Internal Server Error") => {
 };
 
 // --- DATABASE INITIALIZATION ---
-const db = new sqlite.Database('./jewelry_orders.db', (err) => {
+const db = new sqlite.Database(dbPath, (err) => {
     if (err) {
         console.error("[FATAL] Error opening database:", err.message);
         process.exit(1); 
     } else {
-        console.log('[INFO] Database connected: jewelry_orders.db');
-        // Ensure the table includes the 'notes' column
+        console.log('[INFO] Database connected at:', dbPath);
+
         db.run(`
             CREATE TABLE IF NOT EXISTS orders (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,28 +109,45 @@ const db = new sqlite.Database('./jewelry_orders.db', (err) => {
         });
     }
 });
+// --- NEW ENDPOINT: IMAGE UPLOAD ---
+app.post('/api/orders/upload-photo', upload.single('photo'), (req, res) => {
+    // Check if the S3 upload was successful
+    if (!req.file || !req.file.location) {
+        // Check if an AWS configuration error occurred
+        if (!process.env.AWS_REGION || !process.env.S3_BUCKET_NAME) {
+            console.error("[ERROR] AWS environment variables are missing.");
+            return res.status(500).json({ status: "error", message: "Server configuration error: AWS credentials missing." });
+        }
+        return res.status(400).json({ status: "error", message: "File upload failed or no file provided." });
+    }
+    
+    const publicUrl = req.file.location;
 
-// --- API Endpoints ---
+    console.log(`[INFO] Image uploaded to S3: ${publicUrl}`);
+    
+    res.json({
+        status: "success",
+        photoUrl: publicUrl
+    });
+});
+// --- END IMAGE UPLOAD ENDPOINT ---
+
+
+// --- EXISTING ENDPOINTS ---
 
 // 1. GET all orders (Returns ALL rows with global stats)
 app.get('/api/orders', (req, res) => {
-    // Sanitize and define query parameters (only sorting remains)
     const sortBy = req.query.sortBy || 'orderReceivedDate'; 
     const sortDirection = (req.query.sortDirection || 'desc').toUpperCase();
 
-    // Input validation for sorting
     const validSortColumns = [
         'id', 'firstName', 'lastName', 'advancePaid', 'totalAmount', 
         'orderReceivedDate', 'sentToWorkshopDate', 'returnedFromWorkshopDate', 'type'
     ];
     if (!validSortColumns.includes(sortBy)) {
-        return res.status(400).json({ 
-            status: "error", 
-            message: `Invalid sortBy column: ${sortBy}` 
-        });
+        return res.status(400).json({ status: "error", message: `Invalid sortBy column: ${sortBy}` });
     }
 
-    // SQL to fetch global statistics
     const statsSql = `
         SELECT 
             COUNT(CASE WHEN collectedByCustomerDate IS NOT NULL THEN 1 END) AS delivered,
@@ -89,42 +158,30 @@ app.get('/api/orders', (req, res) => {
         FROM orders
     `;
 
-    // 1. Get global stats
     db.get(statsSql, [], (err, statsRow) => {
-        if (err) {
-            return handleServerError(res, err, "Failed to calculate global statistics");
-        }
+        if (err) { return handleServerError(res, err, "Failed to calculate global statistics"); }
         
-        // Data SQL: Fetch ALL rows, applying only sorting
         const dataSql = `
             SELECT * FROM orders 
             ORDER BY ${sortBy} ${sortDirection}
         `;
 
-        // 2. Get all data
         db.all(dataSql, [], (err, rows) => { 
-            if (err) {
-                return handleServerError(res, err, "Failed to fetch all orders");
-            }
+            if (err) { return handleServerError(res, err, "Failed to fetch all orders"); }
             
-            console.log(`[INFO] Fetched ${rows.length} total orders.`);
             res.json({
                 status: "success",
                 data: rows,
                 stats: {
-                    total: statsRow.total,
-                    received: statsRow.received,
-                    inWorkshop: statsRow.inWorkshop,
-                    ready: statsRow.ready,
-                    delivered: statsRow.delivered,
+                    total: statsRow.total, received: statsRow.received, inWorkshop: statsRow.inWorkshop, 
+                    ready: statsRow.ready, delivered: statsRow.delivered,
                 },
-                // Pagination object is intentionally omitted
             });
         });
     });
 });
 
-// 2. POST a new order (Improved Error Handling)
+// 2. POST a new order
 app.post('/api/orders', (req, res) => {
     const order = req.body;
     
@@ -133,7 +190,6 @@ app.post('/api/orders', (req, res) => {
         return res.status(400).json({ status: "error", message: "Missing required fields (firstName, totalAmount, orderReceivedDate)." });
     }
 
-    // Ensure values are in the correct order for the table schema
     const allColumns = [
         'firstName', 'lastName', 'address', 'mobile', 'advancePaid', 'remainingAmount', 
         'totalAmount', 'orderReceivedDate', 'sentToWorkshopDate', 'returnedFromWorkshopDate', 
@@ -141,13 +197,11 @@ app.post('/api/orders', (req, res) => {
         'karigarName', 'repairCourierCharges', 'notes' 
     ];
     
-    // Construct keys, placeholders, and values based on the schema and input
     const keys = [];
     const placeholders = [];
     const values = [];
 
     allColumns.forEach(col => {
-        // Check for presence in the incoming order data
         if (Object.prototype.hasOwnProperty.call(order, col)) {
             keys.push(col);
             placeholders.push('?');
