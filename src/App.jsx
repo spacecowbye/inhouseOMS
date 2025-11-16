@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { getStatus } from "./utils/dataUtils"; 
+// The following utilities are still useful for client-side filtering/display:
+// import { calculateWorkshopDays, calculateShowroomDays } from "./utils/dateUtils";
 
 // Import Components
 import StatsCards from "./components/StatsCards"; 
@@ -11,38 +13,6 @@ import DashboardTable from "./components/DashboardTable";
 const API_BASE_URL = "/api/orders";
 const DEBOUNCE_DELAY_MS = 300; // Delay for search/filter fetches
 
-// --- Placeholder for S3 UPLOAD LOGIC ---
-// NOTE: This must be implemented on the backend!
-// The frontend calls this to get a permanent URL.
-const uploadImageToS3 = async (file) => {
-    if (!file) return null;
-
-    // 1. Create a FormData object to send the file to our *backend upload endpoint*
-    const data = new FormData();
-    data.append('photo', file); // 'photo' must match the field name in multer setup on the server.
-
-    try {
-        // 2. Call a NEW, dedicated upload endpoint on the server
-        const response = await fetch(`${API_BASE_URL}/upload-photo`, {
-            method: 'POST',
-            body: data, // IMPORTANT: No Content-Type header needed; browser sets it automatically with boundary
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || 'Image upload failed.');
-        }
-
-        const result = await response.json();
-        // The server must return the final public URL
-        return result.photoUrl; 
-
-    } catch (error) {
-        console.error("Error during image upload process:", error);
-        throw error; // Re-throw to be caught by handleSubmit
-    }
-};
-
 const App = () => {
   const [orders, setOrders] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -53,9 +23,9 @@ const App = () => {
     total: 0, received: 0, inWorkshop: 0, ready: 0, delivered: 0,
   });
   
-  // Sorting State
-  const [sortBy, setSortBy] = useState("orderReceivedDate"); 
-  const [sortDirection, setSortDirection] = useState("desc"); 
+  // Sorting State (Pagination state removed)
+  const [sortBy, setSortBy] = useState("orderReceivedDate"); // Column name matching DB column
+  const [sortDirection, setSortDirection] = useState("desc"); // "asc" or "desc"
 
   // Filter State
   const [showForm, setShowForm] = useState(false);
@@ -69,31 +39,33 @@ const App = () => {
   const timeoutRef = useRef(null);
 
 
-  // Initial Form Data State (CRITICAL UPDATE: Added photoFile)
+  // Initial Form Data State (UPDATED to include notes)
   const initialFormData = useMemo(() => ({
     firstName: "", lastName: "", address: "", mobile: "",
     advancePaid: "", totalAmount: "",
     orderReceivedDate: "", sentToWorkshopDate: "", returnedFromWorkshopDate: "", collectedByCustomerDate: "",
-    type: "Order", trackingNumber: "", shippingDate: "", 
-    photoUrl: "",     // Public URL of the image (saved to DB)
-    photoFile: null,  // The actual File object (used only for upload)
+    type: "Order", trackingNumber: "", shippingDate: "", photoUrl: "",
     repairCourierCharges: "", karigarName: "",
-    notes: "", 
+    notes: "", // <--- NEW NOTES FIELD
+    photoFile: null, // File object for upload
   }), []);
 
   const [formData, setFormData] = useState(initialFormData);
 
-  // --- Core API Data Fetching (Unchanged) ---
+  // --- Core API Data Fetching ---
   const fetchOrders = useCallback(async (
+    // Function now accepts the sorting state directly, overriding the closure if arguments are provided
     sortCol = sortBy,
     sortDir = sortDirection
   ) => {
+    // Only show spinner on first load or when triggered by an action
     if (orders.length === 0) {
       setIsLoading(true);
     }
     
     setError(null);
     try {
+      // Build the query using the passed/defaulted sort parameters
       const query = `?sortBy=${sortCol}&sortDirection=${sortDir}`;
       const response = await fetch(`${API_BASE_URL}${query}`);
       
@@ -113,14 +85,17 @@ const App = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [orders.length]);
+    // FIX: Added missing dependencies (sortBy, sortDirection)
+  }, [orders.length, sortBy, sortDirection]); 
 
   // Initial Load and Re-fetch when sorting changes
   useEffect(() => {
+    // The initial call needs to use the current state values for sorting
+    // We rely on the fetchOrders dependencies to trigger this when sorting state changes.
     fetchOrders(sortBy, sortDirection); 
-  }, [fetchOrders, sortBy, sortDirection]);
+  }, [fetchOrders, sortBy, sortDirection]); 
   
-  // Debounced Filter Effect (Unchanged)
+  // --- Debounced Filter Effect (Unchanged) ---
   useEffect(() => {
       filterRef.current = { searchTerm, statusFilter, typeFilter };
       
@@ -143,11 +118,40 @@ const App = () => {
 
   // --- Handlers ---
 
+  // Placeholder for S3 UPLOAD LOGIC (Copied from previous response)
+  const uploadImageToS3 = async (file) => {
+      if (!file) return null;
+
+      const data = new FormData();
+      data.append('photo', file); 
+
+      try {
+          // NOTE: This endpoint needs to be implemented in server.js
+          const response = await fetch(`${API_BASE_URL}/upload-photo`, {
+              method: 'POST',
+              body: data, 
+          });
+
+          if (!response.ok) {
+              const errorData = await response.json();
+              throw new Error(errorData.message || 'Image upload failed.');
+          }
+
+          const result = await response.json();
+          return result.photoUrl; 
+
+      } catch (error) {
+          console.error("Error during image upload process:", error);
+          throw error; 
+      }
+  };
+
+
   const handleInputChange = (e) => {
     const { name, value, files } = e.target;
-
-    // --- UPDATED PHOTO LOGIC ---
-    if (name === "photoUrl" && files && files[0]) {
+    
+    // --- PHOTO LOGIC ---
+    if (name === "photoFile" && files && files[0]) {
         const file = files[0];
         setFormData((prev) => ({ 
             ...prev, 
@@ -188,12 +192,12 @@ const App = () => {
         }
     }
     // END: Image Upload Execution
-    
+
     const orderToSubmit = {
       ...formData,
-      // Overwrite temporary photoUrl with final S3 URL (or existing URL)
+      // Use final S3 URL (or existing URL) and remove File object
       photoUrl: finalPhotoUrl, 
-      photoFile: undefined, // Do not send File object to Express/DB
+      photoFile: undefined, 
       totalAmount: parseFloat(formData.totalAmount) || 0,
       advancePaid: parseFloat(formData.advancePaid) || 0,
       remainingAmount: parseFloat(formData.remainingAmount) || 0,
@@ -218,6 +222,7 @@ const App = () => {
         throw new Error(`API Error: ${errorData.message}`);
       }
 
+      // REFRESH FIX: Always call fetchOrders with the current sorting state
       await fetchOrders(sortBy, sortDirection); 
 
       // Reset Form State
@@ -249,8 +254,6 @@ const App = () => {
     setEditingId(order.id);
     setShowForm(true);
   };
-  
-  // ... (handleDelete, handleNewOrderClick, handleColumnSort, displayOrders are unchanged)
 
   const handleDelete = async (id) => {
     console.log(`[INFO] Attempting to delete order ID: ${id}.`);
