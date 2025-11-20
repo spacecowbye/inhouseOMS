@@ -5,32 +5,65 @@ import process from "process"
 import path, { dirname } from "path"
 import fs from "fs"
 import { fileURLToPath } from "url"
+import { S3Client } from '@aws-sdk/client-s3'; 
+import multer from 'multer';
+import multerS3 from 'multer-s3';
 
 // ES MODULE FIX FOR __dirname
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
-// --- ADDED S3 AND MULTER IMPORTS ---
-import { S3Client } from '@aws-sdk/client-s3'; 
-import multer from 'multer';
-import multerS3 from 'multer-s3';
-
 const sqlite = sqlite3.verbose();
 const app = express();
 const PORT = 3001;
 
-// ----- CREATE DB DIRECTORY IF NOT EXISTS -----
-// Create persistent DB directory
+// ----- USER AUTHENTICATION CONFIG -----
+const AUTH_USER = process.env.AUTH_USER || 'admin'; 
+const AUTH_PASS = process.env.AUTH_PASS || 'password'; 
+
+// Middleware for HTTP Basic Authentication
+const basicAuth = (req, res, next) => {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader) {
+        // FIX: If NO header is present (initial fetch), simply return 401 
+        // without the WWW-Authenticate header to suppress the browser popup.
+        return res.status(401).json({ status: "error", message: "Authentication required by client." });
+    }
+
+    // If an Authorization header IS present, proceed to validate it
+    const [type, credentials] = authHeader.split(' ');
+    
+    if (type !== 'Basic' || !credentials) {
+        return res.status(401).json({ status: "error", message: "Invalid authentication scheme." });
+    }
+
+    const decoded = Buffer.from(credentials, 'base64').toString();
+    const [user, pass] = decoded.split(':');
+
+    // Check credentials
+    if (user === AUTH_USER && pass === AUTH_PASS) {
+        return next(); // Authentication successful
+    } else {
+        // If credentials are INCORRECT, send the WWW-Authenticate header back.
+        // This makes sense only if the browser/client should try again, 
+        // but since our JS handles the retry, we still suppress the browser popup.
+        // We'll keep the basic auth failure response clean.
+        return res.status(401).json({ status: "error", message: "Invalid credentials." });
+    }
+};
+// ------------------------------------
+
+
+// ----- DB SETUP -----
 const dbDir = path.join(__dirname, "data");
 if (!fs.existsSync(dbDir)) {
     fs.mkdirSync(dbDir, { recursive: true });
 }
-
-// Full path to database file
 const dbPath = path.join(dbDir, "jewelry_orders.db");
 
 
-// --- AWS CONFIGURATION ---
+// --- AWS CONFIGURATION (omitted for brevity) ---
 const s3 = new S3Client({
     region: process.env.AWS_REGION,
     credentials: {
@@ -44,7 +77,7 @@ const upload = multer({
         s3: s3,
         bucket: process.env.S3_BUCKET_NAME,
         acl: "public-read",
-        contentType: multerS3.AUTO_CONTENT_TYPE,   // ⭐ FIXES THE DOWNLOAD ISSUE
+        contentType: multerS3.AUTO_CONTENT_TYPE,   
         metadata: function (req, file, cb) {
             cb(null, { fieldName: file.fieldname });
         },
@@ -64,13 +97,18 @@ const upload = multer({
 app.use(cors());
 app.use(express.json());
 
+// --- APPLY AUTHENTICATION TO ALL API ENDPOINTS ---
+app.use('/api', basicAuth);
+// --------------------------------------------------
+
+
 // --- GLOBAL ERROR HANDLER ---
 const handleServerError = (res, error, message = "Internal Server Error") => {
     console.error(`[ERROR] ${message}:`, error.message);
     res.status(500).json({ status: "error", message: message, details: error.message });
 };
 
-// --- DATABASE INITIALIZATION ---
+// --- DATABASE INITIALIZATION (omitted for brevity) ---
 const db = new sqlite.Database(dbPath, (err) => {
     if (err) {
         console.error("[FATAL] Error opening database:", err.message);
@@ -80,25 +118,12 @@ const db = new sqlite.Database(dbPath, (err) => {
 
         db.run(`
             CREATE TABLE IF NOT EXISTS orders (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                firstName TEXT,
-                lastName TEXT,
-                address TEXT,
-                mobile TEXT,
-                advancePaid INTEGER,
-                remainingAmount INTEGER,
-                totalAmount INTEGER,
-                orderReceivedDate TEXT,
-                sentToWorkshopDate TEXT,
-                returnedFromWorkshopDate TEXT,
-                collectedByCustomerDate TEXT,
-                type TEXT,
-                trackingNumber TEXT,
-                shippingDate TEXT,
-                photoUrl TEXT,
-                karigarName TEXT,
-                repairCourierCharges INTEGER,
-                notes TEXT  
+                id INTEGER PRIMARY KEY AUTOINCREMENT, firstName TEXT, lastName TEXT, address TEXT, mobile TEXT,
+                advancePaid INTEGER, remainingAmount INTEGER, totalAmount INTEGER,
+                orderReceivedDate TEXT, sentToWorkshopDate TEXT, returnedFromWorkshopDate TEXT, 
+                collectedByCustomerDate TEXT, type TEXT, trackingNumber TEXT, 
+                shippingDate TEXT, photoUrl TEXT, karigarName TEXT, 
+                repairCourierCharges INTEGER, notes TEXT  
             )
         `, (err) => {
             if (err) {
@@ -109,11 +134,11 @@ const db = new sqlite.Database(dbPath, (err) => {
         });
     }
 });
+
 // --- NEW ENDPOINT: IMAGE UPLOAD ---
 app.post('/api/orders/upload-photo', upload.single('photo'), (req, res) => {
     // Check if the S3 upload was successful
     if (!req.file || !req.file.location) {
-        // Check if an AWS configuration error occurred
         if (!process.env.AWS_REGION || !process.env.S3_BUCKET_NAME) {
             console.error("[ERROR] AWS environment variables are missing.");
             return res.status(500).json({ status: "error", message: "Server configuration error: AWS credentials missing." });
@@ -132,8 +157,6 @@ app.post('/api/orders/upload-photo', upload.single('photo'), (req, res) => {
 });
 // --- END IMAGE UPLOAD ENDPOINT ---
 
-
-// --- EXISTING ENDPOINTS ---
 
 // 1. GET all orders (Returns ALL rows with global stats)
 app.get('/api/orders', (req, res) => {

@@ -1,31 +1,45 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { getStatus } from "./utils/dataUtils"; 
-// The following utilities are still useful for client-side filtering/display:
-// import { calculateWorkshopDays, calculateShowroomDays } from "./utils/dateUtils";
 
 // Import Components
 import StatsCards from "./components/StatsCards"; 
 import TableControls from "./components/TableControls"; 
 import OrderForm from "./components/OrderForm"; 
 import DashboardTable from "./components/DashboardTable"; 
+import LoginScreen from "./components/LoginScreen"; 
 
 // --- API Configuration ---
 const API_BASE_URL = "/api/orders";
-const DEBOUNCE_DELAY_MS = 300; // Delay for search/filter fetches
+const DEBOUNCE_DELAY_MS = 300; 
+
+// --- Helper: Basic Auth Encoding ---
+const encodeBase64 = (username, password) => {
+    // FIX: Use native browser functions (btoa) for client-side encoding
+    const credentials = `${username}:${password}`;
+    return btoa(credentials);
+};
+// ----------------------------------
+
 
 const App = () => {
   const [orders, setOrders] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   
+  // --- AUTHENTICATION STATE ---
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authError, setAuthError] = useState(null);
+  const [authCredentials, setAuthCredentials] = useState(null); // Stores base64 token
+  // ----------------------------
+  
   // State for global statistics calculated by the server
   const [globalStats, setGlobalStats] = useState({
     total: 0, received: 0, inWorkshop: 0, ready: 0, delivered: 0,
   });
   
-  // Sorting State (Pagination state removed)
-  const [sortBy, setSortBy] = useState("orderReceivedDate"); // Column name matching DB column
-  const [sortDirection, setSortDirection] = useState("desc"); // "asc" or "desc"
+  // Sorting State
+  const [sortBy, setSortBy] = useState("orderReceivedDate"); 
+  const [sortDirection, setSortDirection] = useState("desc"); 
 
   // Filter State
   const [showForm, setShowForm] = useState(false);
@@ -34,41 +48,101 @@ const App = () => {
   const [statusFilter, setStatusFilter] = useState("Active");
   const [typeFilter, setTypeFilter] = useState("All");
 
-  // Ref to store the latest search/filter values for the debounced fetch
   const filterRef = useRef({ searchTerm, statusFilter, typeFilter });
   const timeoutRef = useRef(null);
 
-
-  // Initial Form Data State (UPDATED to include notes)
   const initialFormData = useMemo(() => ({
     firstName: "", lastName: "", address: "", mobile: "",
     advancePaid: "", totalAmount: "",
     orderReceivedDate: "", sentToWorkshopDate: "", returnedFromWorkshopDate: "", collectedByCustomerDate: "",
-    type: "Order", trackingNumber: "", shippingDate: "", photoUrl: "",
+    type: "Order", trackingNumber: "", shippingDate: "", 
+    photoUrl: "",     
+    photoFile: null,  
     repairCourierCharges: "", karigarName: "",
-    notes: "", // <--- NEW NOTES FIELD
-    photoFile: null, // File object for upload
+    notes: "", 
   }), []);
 
   const [formData, setFormData] = useState(initialFormData);
 
+  // --- Auth Header Helper ---
+  const getAuthHeader = useCallback(() => {
+    if (authCredentials) {
+        return { 'Authorization': `Basic ${authCredentials}` };
+    }
+    return {};
+  }, [authCredentials]);
+
+  // --- LOGIN FUNCTION ---
+
+const handleLogin = async (username, password) => {
+    const encoded = encodeBase64(username, password);
+    setAuthError(null);
+    setIsLoading(true);
+
+    try {
+        // Verify credentials by making a test API call
+        const response = await fetch(`${API_BASE_URL}?sortBy=orderReceivedDate&sortDirection=desc`, {
+            headers: { 'Authorization': `Basic ${encoded}` }
+        });
+
+        if (response.status === 401) {
+            setAuthError("Invalid username or password. Please try again.");
+            setIsLoading(false);
+            return;
+        }
+
+        if (!response.ok) {
+            throw new Error('Authentication failed');
+        }
+
+        // Only set authentication state if credentials are valid
+        const result = await response.json();
+        setAuthCredentials(encoded);
+        setIsAuthenticated(true);
+        setOrders(result.data);
+        setGlobalStats(result.stats);
+
+    } catch (err) {
+        console.error('Login error:', err);
+        setAuthError(err.message || "Login failed. Please try again.");
+    } finally {
+        setIsLoading(false);
+    }
+};
+  
+  // --- Logout Function (Optional, but good practice) ---
+  const handleLogout = () => {
+    setIsAuthenticated(false);
+    setAuthCredentials(null);
+    setOrders([]); // Clear sensitive data
+  };
+  
+
   // --- Core API Data Fetching ---
   const fetchOrders = useCallback(async (
-    // Function now accepts the sorting state directly, overriding the closure if arguments are provided
     sortCol = sortBy,
     sortDir = sortDirection
   ) => {
-    // Only show spinner on first load or when triggered by an action
+    if (!authCredentials) return; // Prevent fetch if not authenticated
+
     if (orders.length === 0) {
       setIsLoading(true);
     }
     
     setError(null);
     try {
-      // Build the query using the passed/defaulted sort parameters
       const query = `?sortBy=${sortCol}&sortDirection=${sortDir}`;
-      const response = await fetch(`${API_BASE_URL}${query}`);
+      const response = await fetch(`${API_BASE_URL}${query}`, {
+          headers: getAuthHeader(), // <--- AUTH HEADER
+      });
       
+      if (response.status === 401) {
+          // If server rejects the token, force re-login
+          setIsAuthenticated(false);
+          setAuthError("Invalid credentials. Please try again.");
+          return;
+      }
+
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.message || 'Failed to fetch orders from API.');
@@ -78,24 +152,25 @@ const App = () => {
       
       setOrders(result.data);
       setGlobalStats(result.stats);
+      setIsAuthenticated(true); // Confirm authentication successful
       
     } catch (err) {
       console.error('Error fetching orders:', err);
+      // If error is network related (CORS, network down, etc.)
       setError(err.message);
     } finally {
       setIsLoading(false);
     }
-    // FIX: Added missing dependencies (sortBy, sortDirection)
-  }, [orders.length, sortBy, sortDirection]); 
+  }, [orders.length, sortBy, sortDirection, authCredentials, getAuthHeader]);
 
-  // Initial Load and Re-fetch when sorting changes
+  // Initial Load and Re-fetch when sorting/auth changes
   useEffect(() => {
-    // The initial call needs to use the current state values for sorting
-    // We rely on the fetchOrders dependencies to trigger this when sorting state changes.
-    fetchOrders(sortBy, sortDirection); 
-  }, [fetchOrders, sortBy, sortDirection]); 
+    if (isAuthenticated) {
+        fetchOrders(sortBy, sortDirection); 
+    }
+  }, [fetchOrders, sortBy, sortDirection, isAuthenticated]);
   
-  // --- Debounced Filter Effect (Unchanged) ---
+  // Debounced Filter Effect (Unchanged)
   useEffect(() => {
       filterRef.current = { searchTerm, statusFilter, typeFilter };
       
@@ -116,21 +191,21 @@ const App = () => {
   }, [searchTerm, statusFilter, typeFilter]);
 
 
-  // --- Handlers ---
-
-  // Placeholder for S3 UPLOAD LOGIC (Copied from previous response)
+  // Placeholder for S3 UPLOAD LOGIC 
   const uploadImageToS3 = async (file) => {
-      if (!file) return null;
+      if (!file || !authCredentials) throw new Error("Authentication required for upload.");
 
       const data = new FormData();
       data.append('photo', file); 
 
       try {
-          // NOTE: This endpoint needs to be implemented in server.js
           const response = await fetch(`${API_BASE_URL}/upload-photo`, {
               method: 'POST',
               body: data, 
+              headers: getAuthHeader(), // <--- AUTH HEADER
           });
+          
+          if (response.status === 401) throw new Error("Authentication failed during upload.");
 
           if (!response.ok) {
               const errorData = await response.json();
@@ -150,21 +225,18 @@ const App = () => {
   const handleInputChange = (e) => {
     const { name, value, files } = e.target;
     
-    // --- PHOTO LOGIC ---
     if (name === "photoFile" && files && files[0]) {
         const file = files[0];
         setFormData((prev) => ({ 
             ...prev, 
-            photoFile: file, // Save the actual File object
-            photoUrl: URL.createObjectURL(file) // Generate temp URL for instant preview
+            photoFile: file, 
+            photoUrl: URL.createObjectURL(file) 
         }));
         return;
     }
-    // --- END PHOTO LOGIC ---
 
     setFormData((prev) => {
       const updated = { ...prev, [name]: value };
-      // Financial calculation logic
       if (name === "totalAmount" || name === "advancePaid") {
         const total = parseFloat(name === "totalAmount" ? value : updated.totalAmount) || 0;
         const advance = parseFloat(name === "advancePaid" ? value : updated.advancePaid) || 0;
@@ -178,7 +250,6 @@ const App = () => {
     e.preventDefault();
     setIsLoading(true);
     
-    // START: Image Upload Execution
     let finalPhotoUrl = formData.photoUrl;
 
     if (formData.photoFile) {
@@ -188,14 +259,12 @@ const App = () => {
         } catch (uploadError) {
             setError(`Failed to upload image: ${uploadError.message}`);
             setIsLoading(false);
-            return; // Stop submission if upload fails
+            return; 
         }
     }
-    // END: Image Upload Execution
 
     const orderToSubmit = {
       ...formData,
-      // Use final S3 URL (or existing URL) and remove File object
       photoUrl: finalPhotoUrl, 
       photoFile: undefined, 
       totalAmount: parseFloat(formData.totalAmount) || 0,
@@ -213,19 +282,22 @@ const App = () => {
     try {
       const response = await fetch(url, {
         method: method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+            'Content-Type': 'application/json',
+            ...getAuthHeader() // <--- AUTH HEADER
+        },
         body: JSON.stringify(orderToSubmit), 
       });
+      
+      if (response.status === 401) throw new Error("Authentication failed during save.");
 
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(`API Error: ${errorData.message}`);
       }
 
-      // REFRESH FIX: Always call fetchOrders with the current sorting state
       await fetchOrders(sortBy, sortDirection); 
 
-      // Reset Form State
       setFormData(initialFormData); 
       setEditingId(null);
       setShowForm(false);
@@ -241,10 +313,9 @@ const App = () => {
   };
 
   const handleEdit = (order) => {
-    // When editing, ensure photoFile is null and we use the existing photoUrl
     const formattedOrder = {
       ...order,
-      photoFile: null, // Always reset the file input when loading for edit
+      photoFile: null, 
       totalAmount: String(order.totalAmount || ''),
       advancePaid: String(order.advancePaid || ''),
       remainingAmount: String(order.remainingAmount || ''),
@@ -262,7 +333,10 @@ const App = () => {
     try {
       const response = await fetch(`${API_BASE_URL}/${id}`, {
         method: 'DELETE',
+        headers: getAuthHeader(), // <--- AUTH HEADER
       });
+      
+      if (response.status === 401) throw new Error("Authentication failed during delete.");
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -302,14 +376,12 @@ const App = () => {
   // Client-side filtering (Search, Status, Type)
   const displayOrders = useMemo(() => {
     return orders.filter((order) => {
-      // 1. Search Filtering
       const matchesSearch =
         order.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         order.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         order.mobile.includes(searchTerm) ||
         order.id.toString().includes(searchTerm);
 
-      // 2. Status Filtering
       const status = getStatus(order);
       const matchesStatus =
         statusFilter === "All" ||
@@ -317,7 +389,6 @@ const App = () => {
         (statusFilter === "Delivered" && order.collectedByCustomerDate) ||
         status === statusFilter;
 
-      // 3. Type Filtering
       const matchesType = typeFilter === "All" || order.type === typeFilter;
 
       return matchesSearch && matchesStatus && matchesType;
@@ -325,25 +396,41 @@ const App = () => {
   }, [orders, searchTerm, statusFilter, typeFilter]);
 
 
+  // --- MAIN RENDER LOGIC ---
+  if (!isAuthenticated) {
+    // Show login screen if not authenticated
+    return <LoginScreen handleLogin={handleLogin} error={authError} />;
+  }
+
+
   return (
     <div className="min-h-screen bg-gray-50 p-3 md:p-6">
       <div className="max-w-full mx-auto">
         
-        {/* Header */}
-        <div className="mb-6 md:mb-8">
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">
-            Jewelry Order Dashboard
-          </h1>
-          <p className="text-sm md:text-base text-gray-600">
-            Track and manage all jewelry orders
-          </p>
-          {error && (
+        {/* Header and Logout Button */}
+        <div className="mb-6 md:mb-8 flex justify-between items-center">
+            <div>
+                <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">
+                    Jewelry Order Dashboard
+                </h1>
+                <p className="text-sm md:text-base text-gray-600">
+                    Track and manage all jewelry orders
+                </p>
+            </div>
+            <button 
+                onClick={handleLogout}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors shadow-md"
+            >
+                Logout
+            </button>
+        </div>
+
+        {error && (
             <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mt-4">
                 <strong className="font-bold">Error:</strong>
                 <span className="block sm:inline ml-2">{error}</span>
             </div>
-          )}
-        </div>
+        )}
 
         {/* Stats Cards */}
         <StatsCards stats={globalStats} isLoading={isLoading} />
@@ -385,7 +472,7 @@ const App = () => {
           isLoading={isLoading}
         />
 
-        {/* NO PAGINATION CONTROLS HERE */}
+        {/* Footer */}
         <div className="text-center mt-4 text-sm text-gray-600">
             {isLoading ? "Fetching all records..." : 
              globalStats.total > 0 

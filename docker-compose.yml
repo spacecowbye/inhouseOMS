@@ -1,28 +1,21 @@
 services:
+  # 1. Backend Service (API) - MUST START FIRST
   api:
     build:
       context: .
       dockerfile: server/Dockerfile
     container_name: jewelry_api
     restart: always
-
     env_file:
-      - ./.env
-
+      - ./.env 
     ports:
-      - "3001:3001"
-
-    # Mount only the DB directory, NOT the whole project
+      - "3001:3001" 
+    # Mount the volume to the directory path used by server.js (/usr/src/app/data)
     volumes:
       - db_data:/usr/src/app/data
+    # DEPENDENCY REMOVED: API no longer depends on frontend.
 
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3001/api/orders"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-
-
+  # 2. Frontend Service (React UI/Nginx) - MUST START SECOND
   frontend:
     build:
       context: .
@@ -33,9 +26,9 @@ services:
     restart: always
     ports:
       - "80:80"
+    # CORRECT DEPENDENCY: Only wait for the API service to start.
     depends_on:
-      api:
-        condition: service_healthy
+      - api 
 
 volumes:
   db_data:
