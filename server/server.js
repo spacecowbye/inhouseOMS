@@ -23,6 +23,8 @@ const AUTH_PASS = process.env.AUTH_PASS || 'password';
 
 // Middleware for HTTP Basic Authentication
 const basicAuth = (req, res, next) => {
+    console.log('==== [AUTH] Incoming Auth Header:', req.headers.authorization || 'NONE');
+
     const authHeader = req.headers.authorization;
 
     // Log the expected user/pass from environment variables (for server-side validation)
