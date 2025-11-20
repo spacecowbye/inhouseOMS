@@ -26,9 +26,13 @@ services:
     restart: always
     ports:
       - "80:80"
-    # CORRECT DEPENDENCY: Only wait for the API service to start.
+      - "443:443"   # <-- add this
+    volumes:
+      - /etc/letsencrypt:/etc/letsencrypt:ro     # <-- mount SSL certs
+      - ./inhouseOMS/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
-      - api 
+      - api
+
 
 volumes:
   db_data:
