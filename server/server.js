@@ -22,38 +22,45 @@ const AUTH_USER = process.env.AUTH_USER || 'admin';
 const AUTH_PASS = process.env.AUTH_PASS || 'password'; 
 
 // Middleware for HTTP Basic Authentication
+// Replace your basicAuth middleware with this debug version:
+
 const basicAuth = (req, res, next) => {
     const authHeader = req.headers.authorization;
 
+    console.log('\n=== AUTH DEBUG ===');
+    console.log('Auth Header:', authHeader);
+    
+
     if (!authHeader) {
-        // FIX: If NO header is present (initial fetch), simply return 401 
-        // without the WWW-Authenticate header to suppress the browser popup.
+        console.log('❌ No auth header present');
         return res.status(401).json({ status: "error", message: "Authentication required by client." });
     }
 
-    // If an Authorization header IS present, proceed to validate it
     const [type, credentials] = authHeader.split(' ');
     
     if (type !== 'Basic' || !credentials) {
+        console.log('❌ Invalid auth scheme');
         return res.status(401).json({ status: "error", message: "Invalid authentication scheme." });
     }
 
     const decoded = Buffer.from(credentials, 'base64').toString();
+    console.log('Decoded credentials string:', decoded);
+    
     const [user, pass] = decoded.split(':');
+    console.log('Extracted USER:', user);
+    console.log('Extracted PASS:', pass);
+    console.log('User match:', user === AUTH_USER);
+    console.log('Pass match:', pass === AUTH_PASS);
 
     // Check credentials
     if (user === AUTH_USER && pass === AUTH_PASS) {
-        return next(); // Authentication successful
+        console.log('✅ Authentication successful');
+        return next();
     } else {
-        // If credentials are INCORRECT, send the WWW-Authenticate header back.
-        // This makes sense only if the browser/client should try again, 
-        // but since our JS handles the retry, we still suppress the browser popup.
-        // We'll keep the basic auth failure response clean.
+        console.log('❌ Invalid credentials');
         return res.status(401).json({ status: "error", message: "Invalid credentials." });
     }
 };
-// ------------------------------------
-
 
 // ----- DB SETUP -----
 const dbDir = path.join(__dirname, "data");
