@@ -22,45 +22,56 @@ const AUTH_USER = process.env.AUTH_USER || 'admin';
 const AUTH_PASS = process.env.AUTH_PASS || 'password'; 
 
 // Middleware for HTTP Basic Authentication
-// Replace your basicAuth middleware with this debug version:
-
 const basicAuth = (req, res, next) => {
     const authHeader = req.headers.authorization;
 
-    console.log('\n=== AUTH DEBUG ===');
-    console.log('Auth Header:', authHeader);
+    // Log the expected user/pass from environment variables (for server-side validation)
+    console.log('\n======================================');
+    console.log('[AUTH] Expected USER:', AUTH_USER);
+    console.log('[AUTH] Expected PASS:', AUTH_PASS);
+    console.log('--------------------------------------');
     
+    // Log the header received
+    console.log('[AUTH] Received Auth Header:', authHeader ? authHeader.substring(0, 30) + '...' : 'NONE');
 
     if (!authHeader) {
-        console.log('❌ No auth header present');
+        console.log('[AUTH] ❌ No auth header present. Returning 401.');
         return res.status(401).json({ status: "error", message: "Authentication required by client." });
     }
 
     const [type, credentials] = authHeader.split(' ');
     
     if (type !== 'Basic' || !credentials) {
-        console.log('❌ Invalid auth scheme');
+        console.log('[AUTH] ❌ Invalid auth scheme. Returning 401.');
         return res.status(401).json({ status: "error", message: "Invalid authentication scheme." });
     }
 
-    const decoded = Buffer.from(credentials, 'base64').toString();
-    console.log('Decoded credentials string:', decoded);
+    // Decode the credentials
+    let decoded;
+    try {
+        decoded = Buffer.from(credentials, 'base64').toString();
+    } catch (e) {
+        console.log('[AUTH] ❌ Invalid token encoding. Returning 401.');
+        return res.status(401).json({ status: "error", message: "Invalid token encoding." });
+    }
     
     const [user, pass] = decoded.split(':');
-    console.log('Extracted USER:', user);
-    console.log('Extracted PASS:', pass);
-    console.log('User match:', user === AUTH_USER);
-    console.log('Pass match:', pass === AUTH_PASS);
+    
+    console.log('[AUTH] Decoded Request USER:', user);
+    console.log('[AUTH] Decoded Request PASS:', pass);
 
     // Check credentials
     if (user === AUTH_USER && pass === AUTH_PASS) {
-        console.log('✅ Authentication successful');
+        console.log('[AUTH] ✅ Authentication successful. Proceeding.');
         return next();
     } else {
-        console.log('❌ Invalid credentials');
+        console.log('[AUTH] ❌ Invalid credentials. Returning 401.');
+        // This rejection handles the case where the user entered the wrong info.
         return res.status(401).json({ status: "error", message: "Invalid credentials." });
     }
 };
+// ------------------------------------
+
 
 // ----- DB SETUP -----
 const dbDir = path.join(__dirname, "data");
