@@ -5,9 +5,9 @@ import process from "process"
 import path, { dirname } from "path"
 import fs from "fs"
 import { fileURLToPath } from "url"
-import { S3Client } from '@aws-sdk/client-s3'; 
-import multer from 'multer';
-import multerS3 from 'multer-s3';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
+import multer from 'multer'
+import sharp from "sharp"
 
 // ES MODULE FIX FOR __dirname
 const __filename = fileURLToPath(import.meta.url)
@@ -27,48 +27,42 @@ const basicAuth = (req, res, next) => {
 
     const authHeader = req.headers.authorization;
 
-    // Log the expected user/pass from environment variables (for server-side validation)
     console.log('\n======================================');
     console.log('[AUTH] Expected USER:', AUTH_USER);
     console.log('[AUTH] Expected PASS:', AUTH_PASS);
     console.log('--------------------------------------');
     
-    // Log the header received
     console.log('[AUTH] Received Auth Header:', authHeader ? authHeader.substring(0, 30) + '...' : 'NONE');
 
     if (!authHeader) {
-        console.log('[AUTH] ❌ No auth header present. Returning 401.');
+        console.log('[AUTH] ❌ No auth header present.');
         return res.status(401).json({ status: "error", message: "Authentication required by client." });
     }
 
     const [type, credentials] = authHeader.split(' ');
-    
     if (type !== 'Basic' || !credentials) {
-        console.log('[AUTH] ❌ Invalid auth scheme. Returning 401.');
+        console.log('[AUTH] ❌ Invalid auth scheme.');
         return res.status(401).json({ status: "error", message: "Invalid authentication scheme." });
     }
 
-    // Decode the credentials
     let decoded;
     try {
         decoded = Buffer.from(credentials, 'base64').toString();
     } catch (e) {
-        console.log('[AUTH] ❌ Invalid token encoding. Returning 401.');
+        console.log('[AUTH] ❌ Invalid token encoding.');
         return res.status(401).json({ status: "error", message: "Invalid token encoding." });
     }
     
     const [user, pass] = decoded.split(':');
-    
+
     console.log('[AUTH] Decoded Request USER:', user);
     console.log('[AUTH] Decoded Request PASS:', pass);
 
-    // Check credentials
     if (user === AUTH_USER && pass === AUTH_PASS) {
-        console.log('[AUTH] ✅ Authentication successful. Proceeding.');
+        console.log('[AUTH] ✅ Authentication successful.');
         return next();
     } else {
-        console.log('[AUTH] ❌ Invalid credentials. Returning 401.');
-        // This rejection handles the case where the user entered the wrong info.
+        console.log('[AUTH] ❌ Invalid credentials.');
         return res.status(401).json({ status: "error", message: "Invalid credentials." });
     }
 };
@@ -83,7 +77,7 @@ if (!fs.existsSync(dbDir)) {
 const dbPath = path.join(dbDir, "jewelry_orders.db");
 
 
-// --- AWS CONFIGURATION (omitted for brevity) ---
+// --- AWS CONFIGURATION ---
 const s3 = new S3Client({
     region: process.env.AWS_REGION,
     credentials: {
@@ -92,25 +86,22 @@ const s3 = new S3Client({
     }
 });
 
-const upload = multer({
-    storage: multerS3({
-        s3: s3,
-        bucket: process.env.S3_BUCKET_NAME,
-        acl: "public-read",
-        contentType: multerS3.AUTO_CONTENT_TYPE,   
-        metadata: function (req, file, cb) {
-            cb(null, { fieldName: file.fieldname });
-        },
-        key: function (req, file, cb) {
-            const safeName = file.originalname
-                .normalize("NFKD")
-                .replace(/[^\w.\-]+/g, "_");
 
-            const filename = `orders/${Date.now()}-${safeName}`;
-            cb(null, filename);
-        }
-    })
+// ---- NEW IMAGE UPLOAD CONFIG (HEIC SUPPORT) ----
+const upload = multer({
+    storage: multer.memoryStorage(),
+    fileFilter: (req, file, cb) => {
+        const allowed = [
+            "image/jpeg",
+            "image/png",
+            "image/heic",
+            "image/heif"
+        ];
+        if (allowed.includes(file.mimetype)) cb(null, true);
+        else cb(new Error("Unsupported file type"), false);
+    }
 });
+// ----------------------------------------------------
 
 
 // --- CONFIGURATION ---
@@ -128,7 +119,8 @@ const handleServerError = (res, error, message = "Internal Server Error") => {
     res.status(500).json({ status: "error", message: message, details: error.message });
 };
 
-// --- DATABASE INITIALIZATION (omitted for brevity) ---
+
+// --- DATABASE INITIALIZATION ---
 const db = new sqlite.Database(dbPath, (err) => {
     if (err) {
         console.error("[FATAL] Error opening database:", err.message);
@@ -155,30 +147,55 @@ const db = new sqlite.Database(dbPath, (err) => {
     }
 });
 
-// --- NEW ENDPOINT: IMAGE UPLOAD ---
-app.post('/api/orders/upload-photo', upload.single('photo'), (req, res) => {
-    // Check if the S3 upload was successful
-    if (!req.file || !req.file.location) {
-        if (!process.env.AWS_REGION || !process.env.S3_BUCKET_NAME) {
-            console.error("[ERROR] AWS environment variables are missing.");
-            return res.status(500).json({ status: "error", message: "Server configuration error: AWS credentials missing." });
+
+// --- NEW ENDPOINT: IMAGE UPLOAD (HEIC → JPEG CONVERSION) ---
+app.post('/api/orders/upload-photo', upload.single('photo'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ status: "error", message: "No file uploaded" });
         }
-        return res.status(400).json({ status: "error", message: "File upload failed or no file provided." });
+
+        let outputBuffer = req.file.buffer;
+        let finalExtension = "jpg";
+
+        // Convert HEIC → JPEG
+        if (req.file.mimetype === "image/heic" || req.file.mimetype === "image/heif") {
+            outputBuffer = await sharp(req.file.buffer)
+                .jpeg({ quality: 90 })
+                .toBuffer();
+        }
+
+        const filename = `orders/${Date.now()}.${finalExtension}`;
+
+        await s3.send(new PutObjectCommand({
+            Bucket: process.env.S3_BUCKET_NAME,
+            Key: filename,
+            Body: outputBuffer,
+            ACL: "public-read",
+            ContentType: "image/jpeg"
+        }));
+
+        const publicUrl = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${filename}`;
+
+        console.log(`[INFO] Image uploaded to S3: ${publicUrl}`);
+
+        res.json({
+            status: "success",
+            photoUrl: publicUrl
+        });
+
+    } catch (err) {
+        console.error("[UPLOAD ERROR]", err);
+        res.status(500).json({ status: "error", message: "Upload failed" });
     }
-    
-    const publicUrl = req.file.location;
-
-    console.log(`[INFO] Image uploaded to S3: ${publicUrl}`);
-    
-    res.json({
-        status: "success",
-        photoUrl: publicUrl
-    });
 });
-// --- END IMAGE UPLOAD ENDPOINT ---
+// --- END IMAGE UPLOAD ---
 
 
-// 1. GET all orders (Returns ALL rows with global stats)
+
+// ---------------- ORDERS CRUD ----------------
+
+// GET all orders
 app.get('/api/orders', (req, res) => {
     const sortBy = req.query.sortBy || 'orderReceivedDate'; 
     const sortDirection = (req.query.sortDirection || 'desc').toUpperCase();
@@ -224,7 +241,8 @@ app.get('/api/orders', (req, res) => {
     });
 });
 
-// 2. POST a new order
+
+// POST new order
 app.post('/api/orders', (req, res) => {
     const order = req.body;
     
@@ -264,7 +282,8 @@ app.post('/api/orders', (req, res) => {
     });
 });
 
-// 3. PUT (Update) an order
+
+// PUT update order
 app.put('/api/orders/:id', (req, res) => {
     const id = req.params.id;
     const order = req.body;
@@ -293,7 +312,8 @@ app.put('/api/orders/:id', (req, res) => {
     });
 });
 
-// 4. DELETE an order
+
+// DELETE order
 app.delete('/api/orders/:id', (req, res) => {
     const id = req.params.id;
     const sql = "DELETE FROM orders WHERE id = ?";
@@ -311,7 +331,8 @@ app.delete('/api/orders/:id', (req, res) => {
     });
 });
 
-// Start server
+
+// --- START SERVER ---
 app.listen(PORT, () => {
     console.log(`[INFO] Server running on http://localhost:${PORT}`);
     console.log(`[INFO] API available at http://localhost:${PORT}/api/orders`);
