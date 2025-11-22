@@ -67,8 +67,8 @@ const OrderForm = ({
 
       {/* Financial Details */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-        <input type="number" name="totalAmount" placeholder="Total Amount (₹) *" value={formData.totalAmount} onChange={handleInputChange} required className="border border-gray-300 rounded-lg px-3 py-2" />
-        <input type="number" name="advancePaid" placeholder="Advance Paid (₹) *" value={formData.advancePaid} onChange={handleInputChange} required className="border border-gray-300 rounded-lg px-3 py-2" />
+        <input type="number" name="totalAmount" placeholder="Total Amount (₹) *" value={formData.totalAmount} onChange={handleInputChange}  className="border border-gray-300 rounded-lg px-3 py-2" />
+        <input type="number" name="advancePaid" placeholder="Advance Paid (₹) *" value={formData.advancePaid} onChange={handleInputChange}  className="border border-gray-300 rounded-lg px-3 py-2" />
         <input type="number" placeholder="Balance (₹)" value={balanceAmount || ""} readOnly className="border border-gray-300 rounded-lg px-3 py-2 bg-gray-50" />
       </div>
 
