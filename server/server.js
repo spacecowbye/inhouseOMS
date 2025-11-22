@@ -246,9 +246,13 @@ app.get('/api/orders', (req, res) => {
 app.post('/api/orders', (req, res) => {
     const order = req.body;
     
-    if (!order.firstName || !order.totalAmount || !order.orderReceivedDate) {
+    // UPDATED → totalAmount is no longer mandatory
+    if (!order.firstName || !order.orderReceivedDate) {
         console.error("[ERROR] Missing required fields in POST body.");
-        return res.status(400).json({ status: "error", message: "Missing required fields (firstName, totalAmount, orderReceivedDate)." });
+        return res.status(400).json({
+            status: "error",
+            message: "Missing required fields (firstName, orderReceivedDate)."
+        });
     }
 
     const allColumns = [
