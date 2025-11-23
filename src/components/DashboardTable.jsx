@@ -124,10 +124,8 @@ const DashboardTable = ({
   const rowsToRender =
     isLoading && orders.length === 0 ? 5 : orders.length;
 
-  // ---- Image Modal State ----
   const [selectedImage, setSelectedImage] = useState(null);
 
-  // Close on ESC key
   useEffect(() => {
     const handleEsc = (e) => {
       if (e.key === "Escape") setSelectedImage(null);
@@ -138,7 +136,6 @@ const DashboardTable = ({
 
   return (
     <div className="bg-white rounded-lg shadow overflow-hidden relative">
-      {/* TABLE */}
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead className="bg-gray-50 border-b border-gray-200">
@@ -258,7 +255,7 @@ const DashboardTable = ({
                       </div>
                     </td>
 
-                    {/* TYPE */}
+                    {/* TYPE + AWB */}
                     <td className="px-4 py-4 whitespace-nowrap">
                       <span
                         className={`px-2 py-1 text-xs font-medium rounded ${getTypeColor(
@@ -267,6 +264,13 @@ const DashboardTable = ({
                       >
                         {order.type}
                       </span>
+
+                      {/* --- AWB BELOW TYPE --- */}
+                      {order.type === "Delivery" && order.trackingNumber && (
+                        <div className="text-xs text-gray-500 mt-1">
+                          AWB: {order.trackingNumber}
+                        </div>
+                      )}
                     </td>
 
                     {/* CUSTOMER */}
@@ -404,16 +408,12 @@ const DashboardTable = ({
         </table>
       </div>
 
-      {/* EMPTY STATE */}
       {!isLoading && orders.length === 0 && (
         <div className="text-center py-12 text-gray-500">
           No orders found matching your criteria
         </div>
       )}
 
-      {/* ------------------------------------------------------------------
-          IMAGE VIEWER MODAL
-      ------------------------------------------------------------------ */}
       {selectedImage && (
         <div
           className="fixed inset-0 bg-black bg-opacity-70 backdrop-blur-sm flex items-center justify-center z-50 p-4 cursor-pointer"
