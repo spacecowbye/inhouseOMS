@@ -125,7 +125,7 @@ const upload = multer({
         key: function (req, file, cb) {
             const safeName = file.originalname
                 .normalize("NFKD")
-                .replace(/[^\w.\-]+/g, "_");
+                .replace(/[-\w.]+/g, "_"); 
 
             const filename = `orders/${Date.now()}-${safeName}`;
             cb(null, filename);
