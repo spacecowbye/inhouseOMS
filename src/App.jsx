@@ -9,11 +9,10 @@ import LoginScreen from "./components/LoginScreen";
 
 const API_BASE_URL = "/api/orders";
 const DEBOUNCE_DELAY_MS = 300; 
+// 💡 NEW: Base URL for the public login endpoint
+const LOGIN_URL = "/login"; 
 
-const encodeBase64 = (username, password) => {
-    const credentials = `${username}:${password}`;
-    return btoa(credentials);
-};
+// ❌ DELETED: encodeBase64 is no longer needed
 
 const App = () => {
   const [orders, setOrders] = useState([]);
@@ -22,7 +21,8 @@ const App = () => {
 
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authError, setAuthError] = useState(null);
-  const [authCredentials, setAuthCredentials] = useState(null);
+  // 💡 CHANGE: authCredentials now stores the JWT Token string
+  const [authToken, setAuthToken] = useState(null);
 
   const [globalStats, setGlobalStats] = useState({
     total: 0, received: 0, inWorkshop: 0, ready: 0, delivered: 0,
@@ -40,7 +40,6 @@ const App = () => {
   const filterRef = useRef({ searchTerm, statusFilter, typeFilter });
   const timeoutRef = useRef(null);
 
-  // NEW — Delete confirmation state
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
 
   const initialFormData = useMemo(() => ({
@@ -56,21 +55,26 @@ const App = () => {
 
   const [formData, setFormData] = useState(initialFormData);
 
+  // 💡 CHANGE: Use Bearer scheme with the JWT Token
   const getAuthHeader = useCallback(() => {
-    if (authCredentials) {
-        return { 'Authorization': `Basic ${authCredentials}` };
+    if (authToken) {
+        return { 'Authorization': `Bearer ${authToken}` };
     }
     return {};
-  }, [authCredentials]);
+  }, [authToken]);
 
+
+  // 💡 CHANGE: New Login Handler for JWT
   const handleLogin = async (username, password) => {
-    const encoded = encodeBase64(username, password);
     setAuthError(null);
     setIsLoading(true);
 
     try {
-        const response = await fetch(`${API_BASE_URL}?sortBy=orderReceivedDate&sortDirection=desc`, {
-            headers: { 'Authorization': `Basic ${encoded}` }
+        // 1. Call the public /login endpoint
+        const response = await fetch(LOGIN_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password }),
         });
 
         if (response.status === 401) {
@@ -82,10 +86,16 @@ const App = () => {
         if (!response.ok) throw new Error('Authentication failed');
 
         const result = await response.json();
-        setAuthCredentials(encoded);
+        
+        // 2. Extract and store the token
+        const token = result.token;
+        localStorage.setItem('authToken', token); // Persist token in local storage
+        setAuthToken(token);
         setIsAuthenticated(true);
-        setOrders(result.data);
-        setGlobalStats(result.stats);
+        
+        // 3. Immediately fetch orders with the new token
+        // This is done implicitly by the useEffect below, but let's reset loading now.
+        // We will let the main useEffect trigger fetchOrders.
 
     } catch (err) {
         console.error('Login error:', err);
@@ -95,17 +105,39 @@ const App = () => {
     }
   };
 
+  // 💡 CHANGE: Logout handler clears local storage
   const handleLogout = () => {
+    localStorage.removeItem('authToken'); 
     setIsAuthenticated(false);
-    setAuthCredentials(null);
+    setAuthToken(null);
     setOrders([]);
+    setError(null);
   };
+  
+  // 💡 NEW: Check local storage for token on mount for persistence
+  useEffect(() => {
+      const storedToken = localStorage.getItem('authToken');
+      if (storedToken) {
+          // Note: In a production app, you would verify this token's expiration 
+          // before setting isAuthenticated to true. For simplicity, we trust it here.
+          setAuthToken(storedToken);
+          setIsAuthenticated(true);
+      } else {
+          // If no token, we are not logged in and not loading data
+          setIsLoading(false);
+      }
+  }, []);
 
+  // 💡 CHANGE: fetchOrders now uses authToken
   const fetchOrders = useCallback(async (
     sortCol = sortBy,
     sortDir = sortDirection
   ) => {
-    if (!authCredentials) return;
+    // Check for the token, not just the state
+    if (!authToken) {
+        setIsLoading(false);
+        return;
+    }
 
     if (orders.length === 0) setIsLoading(true);
     
@@ -113,12 +145,14 @@ const App = () => {
     try {
       const query = `?sortBy=${sortCol}&sortDirection=${sortDir}`;
       const response = await fetch(`${API_BASE_URL}${query}`, {
-          headers: getAuthHeader(),
+          headers: getAuthHeader(), // uses Bearer token
       });
 
+      // Handle token expiration/rejection
       if (response.status === 401) {
-          setIsAuthenticated(false);
-          setAuthError("Invalid credentials. Please try again.");
+          // Clear token if the server says it's bad
+          handleLogout(); 
+          setAuthError("Session expired or invalid. Please log in again.");
           return;
       }
 
@@ -135,13 +169,15 @@ const App = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [orders.length, sortBy, sortDirection, authCredentials, getAuthHeader]);
+  }, [orders.length, sortBy, sortDirection, authToken, getAuthHeader, handleLogout]);
 
+  // 💡 Dependency change: Now depends on authToken, which handles initial load from storage
   useEffect(() => {
-    if (isAuthenticated) {
+    // Only fetch if authToken is present (either from login or local storage)
+    if (authToken) {
         fetchOrders(sortBy, sortDirection); 
     }
-  }, [fetchOrders, sortBy, sortDirection, isAuthenticated]);
+  }, [fetchOrders, sortBy, sortDirection, authToken]);
 
   useEffect(() => {
     filterRef.current = { searchTerm, statusFilter, typeFilter };
@@ -157,7 +193,7 @@ const App = () => {
   }, [searchTerm, statusFilter, typeFilter]);
 
   const uploadImageToS3 = async (file) => {
-      if (!file || !authCredentials) throw new Error("Authentication required.");
+      if (!file || !authToken) throw new Error("Authentication required."); // 💡 CHANGE: Check authToken
 
       const data = new FormData();
       data.append('photo', file);
@@ -165,7 +201,7 @@ const App = () => {
       const response = await fetch(`${API_BASE_URL}/upload-photo`, {
         method: 'POST',
         body: data,
-        headers: getAuthHeader(),
+        headers: getAuthHeader(), // uses Bearer token
       });
 
       if (!response.ok) throw new Error("Upload failed");
@@ -173,7 +209,8 @@ const App = () => {
       const result = await response.json();
       return result.photoUrl; 
   };
-
+  
+  // ... (handleInputChange function is unchanged) ...
   const handleInputChange = (e) => {
     const { name, value, files } = e.target;
 
@@ -198,6 +235,7 @@ const App = () => {
     });
   };
 
+  // ... (handleSubmit function is unchanged other than the auth header) ...
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
@@ -236,7 +274,7 @@ const App = () => {
         method,
         headers: { 
             'Content-Type': 'application/json',
-            ...getAuthHeader()
+            ...getAuthHeader() // uses Bearer token
         },
         body: JSON.stringify(orderToSubmit), 
       });
@@ -256,6 +294,7 @@ const App = () => {
     }
   };
 
+  // ... (handleEdit function is unchanged) ...
   const handleEdit = (order) => {
     const formattedOrder = {
       ...order,
@@ -270,14 +309,14 @@ const App = () => {
     setShowForm(true);
   };
 
-  // REAL DELETE OPERATION
+  // REAL DELETE OPERATION (Auth Header updated via getAuthHeader)
   const handleDelete = async (id) => {
     setIsLoading(true);
 
     try {
       const response = await fetch(`${API_BASE_URL}/${id}`, {
         method: 'DELETE',
-        headers: getAuthHeader(),
+        headers: getAuthHeader(), // uses Bearer token
       });
 
       if (!response.ok) throw new Error("Delete failed");
@@ -290,30 +329,24 @@ const App = () => {
       setIsLoading(false);
     }
   };
-
-  // NEW — Trigger confirmation modal
+  
+  // ... (Other functions are unchanged) ...
   const handleDeleteConfirmation = (id) => {
     setDeleteConfirmId(id);
   };
-
-  // NEW — Cancel modal
   const handleDeleteCancel = () => {
     setDeleteConfirmId(null);
   };
-
-  // NEW — Confirm delete
   const handleDeleteConfirm = async () => {
     if (!deleteConfirmId) return;
     await handleDelete(deleteConfirmId);
     setDeleteConfirmId(null);
   };
-
   const handleNewOrderClick = () => {
     setShowForm(!showForm);
     setEditingId(null);
     setFormData(initialFormData);
   };
-
   const handleColumnSort = (column, newDirection) => {
     if (!newDirection) {
         newDirection = sortDirection === "desc" ? "asc" : "desc";
@@ -351,6 +384,7 @@ const App = () => {
     return <LoginScreen handleLogin={handleLogin} error={authError} />;
   }
 
+  // ... (Return JSX is unchanged) ...
   return (
     <div className="min-h-screen bg-gray-50 p-3 md:p-6">
       <div className="max-w-full mx-auto">
@@ -411,7 +445,7 @@ const App = () => {
         <DashboardTable
           orders={displayOrders} 
           handleEdit={handleEdit}
-          handleDelete={handleDeleteConfirmation}  // <-- UPDATED
+          handleDelete={handleDeleteConfirmation}
           sortBy={sortBy}
           sortDirection={sortDirection}
           handleColumnSort={handleColumnSort}
