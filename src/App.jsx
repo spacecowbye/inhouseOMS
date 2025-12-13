@@ -1,18 +1,18 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { getStatus } from "./utils/dataUtils"; 
+import { getStatus } from "./utils/dataUtils";
 
-import StatsCards from "./components/StatsCards"; 
-import TableControls from "./components/TableControls"; 
-import OrderForm from "./components/OrderForm"; 
-import DashboardTable from "./components/DashboardTable"; 
-import LoginScreen from "./components/LoginScreen"; 
+import StatsCards from "./components/StatsCards";
+import TableControls from "./components/TableControls";
+import OrderForm from "./components/OrderForm";
+import DashboardTable from "./components/DashboardTable";
+import LoginScreen from "./components/LoginScreen";
 
 const API_BASE_URL = "/api/orders";
-const DEBOUNCE_DELAY_MS = 300; 
+const DEBOUNCE_DELAY_MS = 300;
 
 const encodeBase64 = (username, password) => {
-    const credentials = `${username}:${password}`;
-    return btoa(credentials);
+  const credentials = `${username}:${password}`;
+  return btoa(credentials);
 };
 
 const App = () => {
@@ -28,8 +28,8 @@ const App = () => {
     total: 0, received: 0, inWorkshop: 0, ready: 0, delivered: 0,
   });
 
-  const [sortBy, setSortBy] = useState("orderReceivedDate"); 
-  const [sortDirection, setSortDirection] = useState("desc"); 
+  const [sortBy, setSortBy] = useState("orderReceivedDate");
+  const [sortDirection, setSortDirection] = useState("desc");
 
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -47,18 +47,18 @@ const App = () => {
     firstName: "", lastName: "", address: "", mobile: "",
     advancePaid: "", totalAmount: "",
     orderReceivedDate: "", sentToWorkshopDate: "", returnedFromWorkshopDate: "", collectedByCustomerDate: "",
-    type: "Order", trackingNumber: "", shippingDate: "", 
-    photoUrl: "",     
-    photoFile: null,  
+    type: "Order", trackingNumber: "", shippingDate: "",
+    photoUrl: "",
+    photoFile: null,
     repairCourierCharges: "", karigarName: "",
-    notes: "", 
+    notes: "",
   }), []);
 
   const [formData, setFormData] = useState(initialFormData);
 
   const getAuthHeader = useCallback(() => {
     if (authCredentials) {
-        return { 'Authorization': `Basic ${authCredentials}` };
+      return { 'Authorization': `Basic ${authCredentials}` };
     }
     return {};
   }, [authCredentials]);
@@ -69,33 +69,35 @@ const App = () => {
     setIsLoading(true);
 
     try {
-        const response = await fetch(`${API_BASE_URL}?sortBy=orderReceivedDate&sortDirection=desc`, {
-            headers: { 'Authorization': `Basic ${encoded}` }
-        });
+      const response = await fetch(`${API_BASE_URL}?sortBy=orderReceivedDate&sortDirection=desc`, {
+        headers: { 'Authorization': `Basic ${encoded}` }
+      });
 
-        if (response.status === 401) {
-            setAuthError("Invalid username or password. Please try again.");
-            setIsLoading(false);
-            return;
-        }
+      if (response.status === 401) {
+        setAuthError("Invalid username or password. Please try again.");
+        setIsLoading(false);
+        return;
+      }
 
-        if (!response.ok) throw new Error('Authentication failed');
+      if (!response.ok) throw new Error('Authentication failed');
 
-        const result = await response.json();
-        setAuthCredentials(encoded);
-        setIsAuthenticated(true);
-        setOrders(result.data);
-        setGlobalStats(result.stats);
+      const result = await response.json();
+      setAuthCredentials(encoded);
+      setIsAuthenticated(true);
+      localStorage.setItem('jewelry_dashboard_auth', encoded);
+      setOrders(result.data);
+      setGlobalStats(result.stats);
 
     } catch (err) {
-        console.error('Login error:', err);
-        setAuthError(err.message || "Login failed. Please try again.");
+      console.error('Login error:', err);
+      setAuthError(err.message || "Login failed. Please try again.");
     } finally {
-        setIsLoading(false);
+      setIsLoading(false);
     }
   };
 
   const handleLogout = () => {
+    localStorage.removeItem('jewelry_dashboard_auth');
     setIsAuthenticated(false);
     setAuthCredentials(null);
     setOrders([]);
@@ -108,18 +110,19 @@ const App = () => {
     if (!authCredentials) return;
 
     if (orders.length === 0) setIsLoading(true);
-    
+
     setError(null);
     try {
       const query = `?sortBy=${sortCol}&sortDirection=${sortDir}`;
       const response = await fetch(`${API_BASE_URL}${query}`, {
-          headers: getAuthHeader(),
+        headers: getAuthHeader(),
       });
 
       if (response.status === 401) {
-          setIsAuthenticated(false);
-          setAuthError("Invalid credentials. Please try again.");
-          return;
+        localStorage.removeItem('jewelry_dashboard_auth');
+        setIsAuthenticated(false);
+        setAuthError("Invalid credentials. Please try again.");
+        return;
       }
 
       if (!response.ok) throw new Error('Failed to fetch orders.');
@@ -128,7 +131,7 @@ const App = () => {
       setOrders(result.data);
       setGlobalStats(result.stats);
       setIsAuthenticated(true);
-      
+
     } catch (err) {
       console.error('Error fetching orders:', err);
       setError(err.message);
@@ -138,53 +141,61 @@ const App = () => {
   }, [orders.length, sortBy, sortDirection, authCredentials, getAuthHeader]);
 
   useEffect(() => {
+    const stored = localStorage.getItem('jewelry_dashboard_auth');
+    if (stored) {
+      setAuthCredentials(stored);
+      setIsAuthenticated(true);
+    }
+  }, []);
+
+  useEffect(() => {
     if (isAuthenticated) {
-        fetchOrders(sortBy, sortDirection); 
+      fetchOrders(sortBy, sortDirection);
     }
   }, [fetchOrders, sortBy, sortDirection, isAuthenticated]);
 
   useEffect(() => {
     filterRef.current = { searchTerm, statusFilter, typeFilter };
-      
+
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
 
-    timeoutRef.current = setTimeout(() => {}, DEBOUNCE_DELAY_MS);
-      
+    timeoutRef.current = setTimeout(() => { }, DEBOUNCE_DELAY_MS);
+
     return () => {
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
     };
-      
+
   }, [searchTerm, statusFilter, typeFilter]);
 
   const uploadImageToS3 = async (file) => {
-      if (!file || !authCredentials) throw new Error("Authentication required.");
+    if (!file || !authCredentials) throw new Error("Authentication required.");
 
-      const data = new FormData();
-      data.append('photo', file);
+    const data = new FormData();
+    data.append('photo', file);
 
-      const response = await fetch(`${API_BASE_URL}/upload-photo`, {
-        method: 'POST',
-        body: data,
-        headers: getAuthHeader(),
-      });
+    const response = await fetch(`${API_BASE_URL}/upload-photo`, {
+      method: 'POST',
+      body: data,
+      headers: getAuthHeader(),
+    });
 
-      if (!response.ok) throw new Error("Upload failed");
+    if (!response.ok) throw new Error("Upload failed");
 
-      const result = await response.json();
-      return result.photoUrl; 
+    const result = await response.json();
+    return result.photoUrl;
   };
 
   const handleInputChange = (e) => {
     const { name, value, files } = e.target;
 
     if (name === "photoFile" && files && files[0]) {
-        const file = files[0];
-        setFormData(prev => ({ 
-            ...prev, 
-            photoFile: file, 
-            photoUrl: URL.createObjectURL(file) 
-        }));
-        return;
+      const file = files[0];
+      setFormData(prev => ({
+        ...prev,
+        photoFile: file,
+        photoUrl: URL.createObjectURL(file)
+      }));
+      return;
     }
 
     setFormData(prev => {
@@ -205,13 +216,13 @@ const App = () => {
     let finalPhotoUrl = formData.photoUrl;
 
     if (formData.photoFile) {
-        try {
-            finalPhotoUrl = await uploadImageToS3(formData.photoFile);
-        } catch (uploadError) {
-            setError(uploadError.message);
-            setIsLoading(false);
-            return; 
-        }
+      try {
+        finalPhotoUrl = await uploadImageToS3(formData.photoFile);
+      } catch (uploadError) {
+        setError(uploadError.message);
+        setIsLoading(false);
+        return;
+      }
     }
 
     const orderToSubmit = {
@@ -224,7 +235,7 @@ const App = () => {
       repairCourierCharges: parseFloat(formData.repairCourierCharges) || null,
     };
 
-    Object.keys(orderToSubmit).forEach(key => 
+    Object.keys(orderToSubmit).forEach(key =>
       (orderToSubmit[key] === "" || orderToSubmit[key] === null) && delete orderToSubmit[key]
     );
 
@@ -234,11 +245,11 @@ const App = () => {
     try {
       const response = await fetch(url, {
         method,
-        headers: { 
-            'Content-Type': 'application/json',
-            ...getAuthHeader()
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeader()
         },
-        body: JSON.stringify(orderToSubmit), 
+        body: JSON.stringify(orderToSubmit),
       });
 
       if (!response.ok) throw new Error("API error");
@@ -250,7 +261,7 @@ const App = () => {
       setShowForm(false);
 
     } catch (err) {
-      setError(err.message); 
+      setError(err.message);
     } finally {
       setIsLoading(false);
     }
@@ -316,10 +327,10 @@ const App = () => {
 
   const handleColumnSort = (column, newDirection) => {
     if (!newDirection) {
-        newDirection = sortDirection === "desc" ? "asc" : "desc";
-        if (sortBy !== column) newDirection = "desc";
+      newDirection = sortDirection === "desc" ? "asc" : "desc";
+      if (sortBy !== column) newDirection = "desc";
     }
-    
+
     setSortBy(column);
     setSortDirection(newDirection);
     fetchOrders(column, newDirection);
@@ -366,7 +377,7 @@ const App = () => {
             </p>
           </div>
 
-          <button 
+          <button
             onClick={handleLogout}
             className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition shadow-md"
           >
@@ -390,7 +401,7 @@ const App = () => {
           setStatusFilter={setStatusFilter}
           typeFilter={typeFilter}
           setTypeFilter={setTypeFilter}
-          sortBy={sortBy} 
+          sortBy={sortBy}
           setSortBy={setSortBy}
           handleNewOrderClick={handleNewOrderClick}
           handleColumnSort={handleColumnSort}
@@ -409,13 +420,14 @@ const App = () => {
 
         {/* Orders Table */}
         <DashboardTable
-          orders={displayOrders} 
+          orders={displayOrders}
           handleEdit={handleEdit}
           handleDelete={handleDeleteConfirmation}  // <-- UPDATED
           sortBy={sortBy}
           sortDirection={sortDirection}
           handleColumnSort={handleColumnSort}
           isLoading={isLoading}
+          authHeaders={getAuthHeader()}
         />
 
         {/* Footer */}
@@ -434,7 +446,7 @@ const App = () => {
           <div className="bg-white rounded-lg shadow-xl p-6 w-80">
             <h2 className="text-lg font-bold text-gray-900 mb-3">Confirm Delete</h2>
             <p className="text-gray-700 mb-6">
-              Are you sure you want to delete this order?  
+              Are you sure you want to delete this order?
               <br />This action <strong>cannot be undone.</strong>
             </p>
 

@@ -192,6 +192,67 @@ app.post('/api/orders/upload-photo', upload.single('photo'), async (req, res) =>
 // --- END IMAGE UPLOAD ---
 
 
+// --- TRACKING PROXY ---
+app.post('/api/track-order', async (req, res) => {
+    const { awb } = req.body;
+    if (!awb) return res.status(400).json({ status: 'error', message: 'AWB required' });
+
+    try {
+        console.log(`[INFO] Tracking AWB: ${awb}`);
+        
+        // Using headers/cookie from user's provided CURL command
+        const response = await fetch('https://www.trackon.in/courier-tracking', {
+            method: 'POST',
+            headers: {
+                'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                'accept-language': 'en-US,en;q=0.9',
+                'cache-control': 'max-age=0',
+                'content-type': 'application/x-www-form-urlencoded',
+                'cookie': '__RequestVerificationToken=uKJc6P-mP8WzTYIlbDBvPe5VgSuwV-z91RU2bOVi4ZpVa-_zPMSapgcpgU-DcU6njHBLjdYwIbH8dytGUIrMPOcKfsMwyRQTc25a0B2VcPY1',
+                'origin': 'https://www.trackon.in',
+                'referer': 'https://www.trackon.in/courier-tracking',
+                'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            },
+            body: `awbSingleTrackingId=${awb}&submit=Submit`
+        });
+
+        const html = await response.text();
+        
+        // Extract strictly the table
+        const tableMatch = html.match(/<table[^>]*class="[^"]*table-hightlight[^"]*"[^>]*>[\s\S]*?<\/table>/i);
+        
+        if (tableMatch) {
+            let cleanHtml = tableMatch[0];
+            // Fix relative image paths to point to trackon.in
+            cleanHtml = cleanHtml.replace(/\/assets\/images\//g, 'https://www.trackon.in/assets/images/');
+            // Remove onClick handlers that might cause errors
+            cleanHtml = cleanHtml.replace(/onclick="[^"]*"/g, '');
+            // Remove hrefs to modals
+            cleanHtml = cleanHtml.replace(/href="#BModel"/g, 'href="#" style="pointer-events: none; text-decoration: none; color: inherit;"');
+            
+            // Hide Transaction Number (2nd col) and Image (4th col)
+            const hideCss = `
+                <style>
+                    table.footable tr > *:nth-child(2), 
+                    table.footable tr > *:nth-child(4) { 
+                        display: none !important; 
+                    }
+                </style>
+            `;
+            
+            res.send(hideCss + cleanHtml);
+        } else {
+            res.send('<div class="p-4 text-center text-gray-500">No tracking information found for this AWB.</div>');
+        }
+
+    } catch (e) {
+        console.error("[TRACKING ERROR]", e);
+        res.status(500).json({ status: 'error', message: 'Tracking failed' });
+    }
+});
+// ----------------------
+
+
 
 // ---------------- ORDERS CRUD ----------------
 
