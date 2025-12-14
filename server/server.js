@@ -15,6 +15,7 @@ const __dirname = dirname(__filename)
 
 const sqlite = sqlite3.verbose();
 const app = express();
+import { handleTwilioMessage } from "./whatsappBot.js" // Import Twilio Handler
 const PORT = 3001;
 
 // ----- USER AUTHENTICATION CONFIG -----
@@ -107,9 +108,18 @@ const upload = multer({
 // --- CONFIGURATION ---
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true })); // For Twilio Webhooks
 
-// --- APPLY AUTHENTICATION TO ALL API ENDPOINTS ---
-app.use('/api', basicAuth);
+// --- APPLY AUTHENTICATION TO ALL API ENDPOINTS (EXCEPT WHATSAPP) ---
+const openRoutes = ['/api/whatsapp-webhook'];
+
+app.use('/api', (req, res, next) => {
+    // Check against the full original URL (e.g., /api/whatsapp-webhook)
+    if (openRoutes.some(route => req.originalUrl.includes(route))) {
+        return next();
+    }
+    basicAuth(req, res, next);
+});
 // --------------------------------------------------
 
 
@@ -146,6 +156,12 @@ const db = new sqlite.Database(dbPath, (err) => {
         });
     }
 });
+
+// --- TWILIO WEBHOOK ---
+app.post('/api/whatsapp-webhook', (req, res) => {
+    handleTwilioMessage(req, res, db, s3, process.env.S3_BUCKET_NAME, process.env.AWS_REGION);
+});
+// ----------------------
 
 
 // --- NEW ENDPOINT: IMAGE UPLOAD (HEIC → JPEG CONVERSION) ---
@@ -208,7 +224,6 @@ app.post('/api/track-order', async (req, res) => {
                 'accept-language': 'en-US,en;q=0.9',
                 'cache-control': 'max-age=0',
                 'content-type': 'application/x-www-form-urlencoded',
-                'cookie': '__RequestVerificationToken=uKJc6P-mP8WzTYIlbDBvPe5VgSuwV-z91RU2bOVi4ZpVa-_zPMSapgcpgU-DcU6njHBLjdYwIbH8dytGUIrMPOcKfsMwyRQTc25a0B2VcPY1',
                 'origin': 'https://www.trackon.in',
                 'referer': 'https://www.trackon.in/courier-tracking',
                 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
