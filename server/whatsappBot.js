@@ -58,6 +58,59 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
             return res.send(`<Response><Message>${helpMsg}</Message></Response>`);
         }
 
+        // --- GENERATE INVOICE COMMAND ---
+        if (lowerText.startsWith('/generate')) {
+            const parts = text.split(/\s+/);
+            const orderId = parts[1];
+
+            if (!orderId) {
+                res.set('Content-Type', 'text/xml');
+                return res.send(`<Response><Message>❌ Please provide an Order ID.\nExample: */generate 123*</Message></Response>`);
+            }
+
+            // Check if order exists
+            db.get("SELECT id, firstName, lastName, mobile FROM orders WHERE id = ?", [orderId], (err, row) => {
+                if (err) {
+                    console.error('[TWILIO] DB Error:', err);
+                    res.set('Content-Type', 'text/xml');
+                    return res.send('<Response><Message>❌ Database Error</Message></Response>');
+                }
+                if (!row) {
+                    res.set('Content-Type', 'text/xml');
+                    return res.send(`<Response><Message>❌ Order #${orderId} not found.</Message></Response>`);
+                }
+
+                const invoiceUrl = `http://deepasoms.duckdns.org/api/orders/${orderId}/invoice`;
+                
+                // Construct Click-to-Chat Link
+                let waLink = "No mobile number";
+                if (row.mobile) {
+                    let cleanMobile = row.mobile.replace(/\D/g, '');
+                    if (cleanMobile.startsWith('0')) cleanMobile = cleanMobile.slice(1);
+                    if (cleanMobile.length === 10) cleanMobile = '91' + cleanMobile;
+
+                    const customerMsg = `Hi ${row.firstName}, here is your invoice: ${invoiceUrl}`;
+                    waLink = `https://wa.me/${cleanMobile}?text=${encodeURIComponent(customerMsg)}`;
+                }
+
+                const bodyText = `📄 *Invoice Generated*\n\n` +
+                                 `👤 ${row.firstName} ${row.lastName}\n\n` +
+                                 `👉 *Chat with Customer:*\n${waLink}\n\n` +
+                                 `🔗 *Download PDF:*\n${invoiceUrl}`;
+
+                res.set('Content-Type', 'text/xml');
+                res.send(`
+                    <Response>
+                        <Message>
+                            <Body>${bodyText}</Body>
+                            <Media>${invoiceUrl}</Media>
+                        </Message>
+                    </Response>
+                `);
+            });
+            return; // Stop further processing
+        }
+
         // --- COMMAND PARSING ---
         let commandType = null;
         if (lowerText.startsWith('/order')) commandType = 'Order';
