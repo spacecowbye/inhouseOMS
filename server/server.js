@@ -111,7 +111,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true })); // For Twilio Webhooks
 
 // --- APPLY AUTHENTICATION TO ALL API ENDPOINTS (EXCEPT WHATSAPP) ---
-const openRoutes = ['/api/whatsapp-webhook'];
+const openRoutes = ['/api/whatsapp-webhook', '/invoice'];
 
 app.use('/api', (req, res, next) => {
     // Check against the full original URL (e.g., /api/whatsapp-webhook)
@@ -411,7 +411,228 @@ app.delete('/api/orders/:id', (req, res) => {
     });
 });
 
+// --- INVOICE GENERATION ENDPOINT (HTML) ---
+// Kept for debugging or quick view
+app.get('/api/orders/:id/invoice/html', (req, res) => {
+    // ... preserved for debug compatibility ...
+    // A simple stripped down version or 404
+    res.status(404).send("HTML view is deprecated. Use the PDF endpoint.");
+});
 
+
+// --- INVOICE PDF ENDPOINT ---
+import PDFDocument from 'pdfkit';
+
+app.get('/api/orders/:id/invoice', async (req, res) => {
+    const id = req.params.id;
+    
+    db.get("SELECT * FROM orders WHERE id = ?", [id], async (err, order) => {
+        if (err) return handleServerError(res, err, "Database error");
+        if (!order) return res.status(404).send("Order not found");
+
+        try {
+            const doc = new PDFDocument({ margin: 50, size: 'A4' });
+
+            // Set response headers
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `attachment; filename=repair_invoice_R-${id}.pdf`);
+            
+            doc.pipe(res);
+
+            // --- LOAD FONTS ---
+            // Try to load Great Vibes for the logo, fallback to Times-Italic
+            let cursiveFont = 'Times-Italic';
+            try {
+                const fontResp = await fetch('https://github.com/google/fonts/raw/main/ofl/greatvibes/GreatVibes-Regular.ttf');
+                if (fontResp.ok) {
+                    const fontBuffer = await fontResp.arrayBuffer();
+                    doc.registerFont('GreatVibes', Buffer.from(fontBuffer));
+                    cursiveFont = 'GreatVibes';
+                }
+            } catch (e) {
+                console.warn("Could not load custom font, using fallback.");
+            }
+
+            // --- HEADER BACKGROUND ---
+            // Full width black background rect for header
+            // A4 width is ~595.28 points
+            doc.rect(0, 0, 595.28, 140).fill('#4a4a4a');
+
+            // --- HEADER CONTENT ---
+            // Left Side: Address
+            doc.fillColor('white');
+            doc.fontSize(10).font('Helvetica-Bold').text('(M): 9227219475 || 9227219475', 50, 30);
+            
+            doc.fontSize(9).font('Helvetica').fillColor('#f9c74f')
+               .text('4 & 5, Ground Flr. Titanium City Center Mall,', 50, 45)
+               .text('Opp.Seema Hall, Near Sachin Tower,', 50, 58)
+               .text('Shyamal Prahladnagar Road,', 50, 71)
+               .text('Satellite, Ahmedabad - 380015.', 50, 84)
+               .fillColor('white'); // Reset to white for GSTIN
+            
+            doc.text('GSTIN No.: 24AAFPS8301R1Z7', 50, 100);
+
+            // Right Side: Logo
+            // Using the custom font if loaded
+            doc.fillColor('white');
+            doc.fontSize(40).font(cursiveFont).text("Deepa's", 350, 30, { align: 'right', width: 195 });
+            
+            doc.fontSize(10).font('Helvetica').fillColor('#f9c74f')
+               .text("customized silver jewellery", 350, 75, { align: 'right', width: 195 });
+               
+            doc.fontSize(8).fillColor('white').text("Appointment Preferable", 350, 88, { align: 'right', width: 195 });
+
+            // Reset Fill Color for body
+            doc.fillColor('black');
+
+            // Title "REPAIR INVOICE"
+            // Positioned below the dark header
+            doc.fontSize(16).font('Helvetica-Bold').text('REPAIR INVOICE', 0, 160, { align: 'center', width: 595.28 });
+            
+            const currentY = 190;
+            // Draw line below title
+            doc.moveTo(50, currentY).lineTo(545, currentY).strokeColor('#cccccc').stroke();
+
+            // --- CUSTOMER INFO ---
+            const infoY = currentY + 15;
+            const date = new Date().toISOString().split('T')[0].split('-').reverse().join('/');
+            
+            // Left Col
+            doc.fontSize(10).font('Helvetica-Bold').text('Name:', 50, infoY);
+            doc.font('Helvetica').text(`${order.firstName} ${order.lastName || ''}`, 100, infoY);
+            
+            doc.font('Helvetica-Bold').text('Address:', 50, infoY + 15);
+            doc.font('Helvetica').text((order.address || '').substring(0, 40), 100, infoY + 15);
+            
+            doc.font('Helvetica-Bold').text('Mobile:', 50, infoY + 30);
+            doc.font('Helvetica').text(order.mobile || '', 100, infoY + 30);
+
+            // Right Col
+            doc.font('Helvetica-Bold').text('ORIGINAL', 400, infoY);
+            doc.text('Invoice No.:', 400, infoY + 15);
+            doc.font('Helvetica').text(`R-${order.id}`, 470, infoY + 15);
+            doc.font('Helvetica-Bold').text('Date:', 400, infoY + 30);
+            doc.font('Helvetica').text(date, 470, infoY + 30);
+
+            const tableTop = infoY + 55;
+            // Draw line below info
+            doc.moveTo(50, tableTop).lineTo(545, tableTop).strokeColor('#cccccc').stroke();
+
+            // --- TABLE HEADER ---
+            // Light grey background for table header
+            doc.rect(50, tableTop, 495, 25).fill('#f0f0f0');
+            doc.fillColor('black'); // Reset text color
+
+            const thY = tableTop + 8; // Vertical centering approx
+            doc.font('Helvetica-Bold').fontSize(10);
+            const drawText = (text, x, y, width, align) => {
+                 doc.text(text, x, y, { width: width, align: align });
+            }
+            
+            drawText('Sr.', 50, thY, 30, 'center');
+            drawText('Image', 90, thY, 120, 'center');
+            drawText('Description', 220, thY, 220, 'left');
+            drawText('Amount', 450, thY, 90, 'right');
+
+            const rowTop = tableTop + 25;
+            
+            // --- TABLE ROW ---
+            let rowY = rowTop + 15;
+            
+            doc.font('Helvetica').fontSize(10);
+            drawText('1', 50, rowY, 30, 'center');
+
+            // Image Handling
+            if (order.photoUrl) {
+                try {
+                    const imgResp = await fetch(order.photoUrl);
+                    if (imgResp.ok) {
+                        const imgBuffer = await imgResp.arrayBuffer();
+                        // Draw Image boxed
+                        doc.image(Buffer.from(imgBuffer), 100, rowY, { fit: [100, 100], align: 'center' });
+                    }
+                } catch (e) {
+                    console.error("Failed to load invoice image:", e);
+                    drawText('[Image Error]', 90, rowY, 120, 'center');
+                }
+            } else {
+                 drawText('[No Image]', 90, rowY, 120, 'center');
+            }
+
+            doc.text(order.notes || (order.type === 'Repair' ? 'Repair Work' : 'Jewelry Item'), 220, rowY, { width: 220 });
+            doc.text(order.totalAmount ? order.totalAmount.toLocaleString('en-IN') : '0', 450, rowY, { width: 90, align: 'right' });
+
+            // Row Bottom
+            const rowHeight = 120; 
+            const totalRowY = rowY + rowHeight;
+            doc.moveTo(50, totalRowY).lineTo(545, totalRowY).strokeColor('#cccccc').stroke();
+
+            // --- TOTAL ROW ---
+            // Light grey background for total
+            doc.rect(50, totalRowY, 495, 25).fill('#f9f9f9');
+            doc.fillColor('black');
+
+            const trY = totalRowY + 8;
+            doc.font('Helvetica-Bold');
+            doc.text('Repair Amount', 300, trY, { width: 140, align: 'right' });
+            doc.text(order.totalAmount ? order.totalAmount.toLocaleString('en-IN') : '0', 450, trY, { width: 90, align: 'right' });
+
+            const footerTop = totalRowY + 35; // Leave some space
+
+            // --- FOOTER ---
+            const footerY = footerTop + 15;
+            
+            // Left: Terms
+            doc.fontSize(8).font('Helvetica-Bold').text('Terms & Conditions', 50, footerY);
+            doc.font('Helvetica').fontSize(7)
+               .list([
+                   'Goods once sold will not be taken back.',
+                   'Show Room Time: 11 am to 8 pm.',
+                   'Appointment Preferable due to Exhibition.',
+                   'Subject to Ahmedabad Jurisdiction.'
+               ], 50, footerY + 15, { bulletRadius: 1 });
+            
+            // Bank Details
+            const bankY = footerY + 70;
+            // Dot dashed line
+            doc.lineWidth(1).dash(2, { space: 2 }).moveTo(50, bankY).lineTo(250, bankY).stroke();
+            doc.undash();
+            
+            doc.font('Helvetica-Bold').fontSize(8).text('Bank Details', 50, bankY + 10);
+            doc.font('Helvetica').fontSize(7)
+               .text('HDFC BANK - VASNA, AHMEDABAD', 50, bankY + 22)
+               .text('A/C No. 50200013555481 | IFSC: HDFC0001229', 50, bankY + 32);
+
+            // Right: Breakdown
+            doc.font('Helvetica').fontSize(10);
+            const breakdownY = footerY;
+            
+            const drawBreakdownRow = (label, value, y, isBold = false) => {
+                if(isBold) doc.font('Helvetica-Bold'); else doc.font('Helvetica');
+                doc.text(label, 350, y, { width: 100, align: 'left' });
+                doc.text(value, 450, y, { width: 90, align: 'right' });
+            };
+
+            drawBreakdownRow('Repair Amount', order.totalAmount?.toLocaleString('en-IN') || '0', breakdownY, true);
+            // Line under gross
+            doc.moveTo(350, breakdownY + 12).lineTo(540, breakdownY + 12).stroke();
+            
+            drawBreakdownRow('Advance', order.advancePaid?.toLocaleString('en-IN') || '0', breakdownY + 20);
+            drawBreakdownRow('Balance', order.remainingAmount?.toLocaleString('en-IN') || '0', breakdownY + 35, true);
+
+            // Footer Note
+            doc.fontSize(8).font('Helvetica-Oblique').text('This is an Electronically Generated Invoice.', 50, 750, { align: 'center', width: 500 });
+            doc.moveTo(50, 740).lineTo(545, 740).strokeColor('#cccccc').stroke();
+
+            doc.end();
+
+        } catch (pdfErr) {
+            console.error("[PDFKIT ERROR]", pdfErr);
+            if (!res.headersSent) handleServerError(res, pdfErr, "Failed to generate PDF");
+        }
+    });
+});
+// -----------------------------------
 // --- START SERVER ---
 app.listen(PORT, () => {
     console.log(`[INFO] Server running on http://localhost:${PORT}`);

@@ -2,11 +2,20 @@ import { PutObjectCommand } from '@aws-sdk/client-s3';
 
 // Helper to download media
 async function downloadMedia(url) {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`Failed to fetch media: ${response.statusText}`);
+    console.log(`[TWILIO] Downloading media from: ${url}`);
+    const response = await fetch(url, {
+        headers: {
+            'User-Agent': 'Mozilla/5.0 (Node.js)'
+        }
+    });
+    if (!response.ok) throw new Error(`Failed to fetch media: ${response.status} ${response.statusText}`);
     const buffer = Buffer.from(await response.arrayBuffer());
     const contentType = response.headers.get('content-type');
-    return { buffer, contentType };
+    
+    // Default to jpeg if indeterminate, but rely on header
+    if (!contentType) console.warn('[TWILIO] Warning: No content-type header from media URL');
+    
+    return { buffer, contentType: contentType || 'image/jpeg' };
 }
 
 export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {

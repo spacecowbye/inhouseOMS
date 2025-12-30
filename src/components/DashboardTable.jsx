@@ -7,6 +7,7 @@ import {
   ArrowUp,
   ArrowDown,
   X,
+  FileText,
 } from "lucide-react";
 import {
   extractCity,
@@ -192,6 +193,12 @@ const DashboardTable = ({
     } finally {
       setIsTrackingLoading(false);
     }
+  };
+
+  const handleInvoice = (order) => {
+    // Construct Invoice URL using the current origin (works for both localhost and prod)
+    const invoiceUrl = `${window.location.origin}/api/orders/${order.id}/invoice`;
+    window.open(invoiceUrl, '_blank');
   };
 
   useEffect(() => {
@@ -462,6 +469,16 @@ const DashboardTable = ({
                       {/* ACTIONS */}
                       <td className="px-4 py-4 whitespace-nowrap">
                         <div className="flex gap-2">
+                          {/* Invoice Button (Repairs Only) */}
+                          {order.type === 'Repair' && (
+                            <button
+                              onClick={() => handleInvoice(order)}
+                              className="text-indigo-600 hover:text-indigo-800"
+                              title="View/Download Invoice PDF"
+                            >
+                              <FileText size={16} />
+                            </button>
+                          )}
                           <button
                             onClick={() => handleEdit(order)}
                             className="text-blue-600 hover:text-blue-800"

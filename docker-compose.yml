@@ -12,6 +12,9 @@ services:
       - "3001"
     volumes:
       - db_data:/usr/src/app/data
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     environment:
       - ALLOWED_ORIGINS=http://deepasoms.duckdns.org,https://deepasoms.duckdns.org
 
