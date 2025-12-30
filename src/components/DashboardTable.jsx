@@ -232,6 +232,19 @@ const DashboardTable = ({
     window.open(invoiceUrl, "_blank");
   };
 
+  const handleMobileClick = (order) => {
+    if (!order.mobile) return;
+
+    let cleanMobile = order.mobile.replace(/\D/g, '');
+    if (cleanMobile.startsWith('0')) cleanMobile = cleanMobile.slice(1);
+    if (cleanMobile.length === 10) cleanMobile = '91' + cleanMobile;
+
+    const message = `Hi ${order.firstName}, attaching your invoice below`;
+    const waUrl = `https://wa.me/${cleanMobile}?text=${encodeURIComponent(message)}`;
+
+    window.open(waUrl, '_blank');
+  };
+
 
   useEffect(() => {
     const handleEsc = (e) => {
@@ -393,7 +406,12 @@ const DashboardTable = ({
                         <div className="text-sm font-medium text-gray-900">
                           {order.firstName} {order.lastName}
                         </div>
-                        <div className="text-xs text-gray-500 mt-1">
+                        <div
+                          className="text-xs text-blue-600 mt-1 cursor-pointer hover:underline flex items-center gap-1"
+                          onClick={() => handleMobileClick(order)}
+                          title="Chat on WhatsApp"
+                        >
+                          <MessageCircle size={10} />
                           {order.mobile}
                         </div>
                       </td>
