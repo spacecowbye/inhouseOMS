@@ -195,11 +195,43 @@ const DashboardTable = ({
     }
   };
 
-  const handleInvoice = (order) => {
-    // Construct Invoice URL using the current origin (works for both localhost and prod)
+  const handleInvoice = async (order) => {
     const invoiceUrl = `${window.location.origin}/api/orders/${order.id}/invoice`;
-    window.open(invoiceUrl, '_blank');
+
+    // Mobile share (WhatsApp, etc.)
+    if (navigator.share) {
+      try {
+        const response = await fetch(invoiceUrl, {
+          headers: authHeaders,
+        });
+
+        const blob = await response.blob();
+
+        const file = new File([blob], `invoice-${order.id}.pdf`, {
+          type: "application/pdf",
+        });
+
+        // Extra safety check
+        if (navigator.canShare && !navigator.canShare({ files: [file] })) {
+          throw new Error("File sharing not supported");
+        }
+
+        await navigator.share({
+          title: "Invoice",
+          text: "Invoice PDF",
+          files: [file],
+        });
+
+        return;
+      } catch (err) {
+        console.error("Share failed, falling back to open PDF", err);
+      }
+    }
+
+    // Desktop / fallback
+    window.open(invoiceUrl, "_blank");
   };
+
 
   useEffect(() => {
     const handleEsc = (e) => {
