@@ -8,6 +8,7 @@ import {
   ArrowDown,
   X,
   FileText,
+  MessageCircle
 } from "lucide-react";
 import {
   extractCity,
