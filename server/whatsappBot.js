@@ -1,8 +1,11 @@
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 
+const log = (...args) => console.log(`[${new Date().toISOString()}]`, ...args);
+const logError = (...args) => console.error(`[${new Date().toISOString()}]`, ...args);
+
 // Helper to download media
 async function downloadMedia(url) {
-    console.log(`[TWILIO] Downloading media from: ${url}`);
+    log(`[TWILIO] Downloading media from: ${url}`);
     const response = await fetch(url, {
         headers: {
             'User-Agent': 'Mozilla/5.0 (Node.js)'
@@ -13,7 +16,7 @@ async function downloadMedia(url) {
     const contentType = response.headers.get('content-type');
     
     // Default to jpeg if indeterminate, but rely on header
-    if (!contentType) console.warn('[TWILIO] Warning: No content-type header from media URL');
+    if (!contentType) log('[TWILIO] Warning: No content-type header from media URL');
     
     return { buffer, contentType: contentType || 'image/jpeg' };
 }
@@ -23,7 +26,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
         const { Body, From, MediaUrl0 } = req.body;
         if (!Body) return res.status(200).send('<Response></Response>');
 
-        console.log(`[TWILIO] Msg from ${From}: ${Body}`);
+        log(`[TWILIO] Msg from ${From}: ${Body}`);
         const text = Body.trim();
         const lowerText = text.toLowerCase();
         
@@ -71,7 +74,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
             // Check if order exists
             db.get("SELECT id, firstName, lastName, mobile FROM orders WHERE id = ?", [orderId], (err, row) => {
                 if (err) {
-                    console.error('[TWILIO] DB Error:', err);
+                    logError('[TWILIO] DB Error:', err);
                     res.set('Content-Type', 'text/xml');
                     return res.send('<Response><Message>❌ Database Error</Message></Response>');
                 }
@@ -179,7 +182,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                 }));
                 photoUrl = `https://${bucket}.s3.${region}.amazonaws.com/${filename}`;
             } catch (err) {
-                console.error('[TWILIO] Media upload failed:', err);
+                logError('[TWILIO] Media upload failed:', err);
             }
         }
 
@@ -204,7 +207,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
 
         db.run(sql, values, function(err) {
             if (err) {
-                console.error('[TWILIO] DB Error:', err);
+                logError('[TWILIO] DB Error:', err);
                 return res.status(500).send('<Response><Message>❌ Database Error</Message></Response>');
             }
             
@@ -223,7 +226,8 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
         });
 
     } catch (e) {
-        console.error('[TWILIO] Error:', e);
-        res.status(500).send('<Response><Message>Server Error</Message></Response>');
+        logError('[TWILIO] Error:', e);
+        res.set('Content-Type', 'text/xml');
+        res.status(500).send('<Response><Message>⚠️ System Error: Something went wrong. Please try again.</Message></Response>');
     }
 };

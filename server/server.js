@@ -18,13 +18,28 @@ const app = express();
 import { handleTwilioMessage } from "./whatsappBot.js" // Import Twilio Handler
 const PORT = 3001;
 
+// --- LOGGING HELPER ---
+const log = (...args) => console.log(`[${new Date().toISOString()}]`, ...args);
+const logError = (...args) => console.error(`[${new Date().toISOString()}]`, ...args);
+
+// --- GLOBAL EXCEPTION HANDLERS ---
+process.on('uncaughtException', (err) => {
+    logError('[FATAL] Uncaught Exception:', err);
+    // Optional: process.exit(1) if you want to force restart, 
+    // but for now we just log to see what's happening.
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    logError('[FATAL] Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
 // ----- USER AUTHENTICATION CONFIG -----
 const AUTH_USER = process.env.AUTH_USER || 'admin'; 
 const AUTH_PASS = process.env.AUTH_PASS || 'password'; 
 
 // Middleware for HTTP Basic Authentication
 const basicAuth = (req, res, next) => {
-    console.log('==== [AUTH] Incoming Auth Header:', req.headers.authorization || 'NONE');
+    // log('==== [AUTH] Incoming Auth Header:', req.headers.authorization || 'NONE');
 
     const authHeader = req.headers.authorization;
 
@@ -36,7 +51,7 @@ const basicAuth = (req, res, next) => {
     console.log('[AUTH] Received Auth Header:', authHeader ? authHeader.substring(0, 30) + '...' : 'NONE');
 
     if (!authHeader) {
-        console.log('[AUTH] ❌ No auth header present.');
+        log('[AUTH] ❌ No auth header present.');
         return res.status(401).json({ status: "error", message: "Authentication required by client." });
     }
 
@@ -110,6 +125,30 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true })); // For Twilio Webhooks
 
+// --- REQUEST LOGGING MIDDLEWARE ---
+app.use((req, res, next) => {
+    const start = Date.now();
+    const { method, url } = req;
+    
+    // Log start (optional, can be noisy)
+    // log(`[REQ] Incoming: ${method} ${url}`);
+
+    // Log completion
+    res.on('finish', () => {
+        const duration = Date.now() - start;
+        const status = res.statusCode;
+        // Color coding status? (Simple version: just log)
+        const msg = `[REQ] ${method} ${url} ${status} - ${duration}ms`;
+        
+        if (status >= 500) logError(msg);
+        else if (status >= 400) log(msg); // Warn?
+        else if (duration > 1000) log(`[SLOW] ${msg}`); // Log slow requests specifically
+        else log(msg);
+    });
+    
+    next();
+});
+
 // --- APPLY AUTHENTICATION TO ALL API ENDPOINTS (EXCEPT WHATSAPP) ---
 const openRoutes = ['/api/whatsapp-webhook', '/invoice'];
 
@@ -125,7 +164,7 @@ app.use('/api', (req, res, next) => {
 
 // --- GLOBAL ERROR HANDLER ---
 const handleServerError = (res, error, message = "Internal Server Error") => {
-    console.error(`[ERROR] ${message}:`, error.message);
+    logError(`[ERROR] ${message}:`, error.message);
     res.status(500).json({ status: "error", message: message, details: error.message });
 };
 
@@ -136,7 +175,7 @@ const db = new sqlite.Database(dbPath, (err) => {
         console.error("[FATAL] Error opening database:", err.message);
         process.exit(1); 
     } else {
-        console.log('[INFO] Database connected at:', dbPath);
+        log('[INFO] Database connected at:', dbPath);
 
         db.run(`
             CREATE TABLE IF NOT EXISTS orders (
@@ -635,6 +674,6 @@ app.get('/api/orders/:id/invoice', async (req, res) => {
 // -----------------------------------
 // --- START SERVER ---
 app.listen(PORT, () => {
-    console.log(`[INFO] Server running on http://localhost:${PORT}`);
-    console.log(`[INFO] API available at http://localhost:${PORT}/api/orders`);
+    log(`[INFO] Server running on http://localhost:${PORT}`);
+    log(`[INFO] API available at http://localhost:${PORT}/api/orders`);
 });
