@@ -38,7 +38,8 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
             if (lowerText.includes('repair')) {
                 helpMsg = `🛠 *REPAIR Order Format*\n${sepInfo}\n\n` +
                           `*Command:*\n/repair Name, Mobile, Address, Total, Advance, Karigar, Notes\n\n` +
-                          `*Example:*\n/repair Deepa Ben, 9925042620, Ahmedabad, 300, 300, HariBabu, Ring repair`;
+                          `*Example (with TBD):*\n/repair Deepa Ben, 9925042620, Ahmedabad, TBD, 0, Karigar, Ring\n\n` +
+                          `💡 Use *TBD* if the amount is not yet fixed.`;
             } else if (lowerText.includes('delivery')) {
                 helpMsg = `🚚 *DELIVERY Order Format*\n${sepInfo}\n\n` +
                           `*Command:*\n/delivery Name, Mobile, Address, Total, Advance, TrackingNumber, Notes\n\n` +
@@ -144,11 +145,25 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
         const firstName = nameParts[0];
         const lastName = nameParts.slice(1).join(' ') || '';
 
+        const parseAmount = (val) => {
+            if (!val) return 0;
+            const clean = val.trim().toLowerCase();
+            if (clean === 'tbd') return -1;
+            const parsed = parseInt(clean);
+            return isNaN(parsed) ? 0 : parsed;
+        };
+
         const mobile = args[1] || '';
         const address = args[2] || '';
-        const totalAmount = parseInt(args[3] || '0');
-        const advancePaid = parseInt(args[4] || '0');
-        const remainingAmount = totalAmount - advancePaid;
+        const totalAmount = parseAmount(args[3]);
+        const advancePaid = parseAmount(args[4]);
+        
+        let remainingAmount = 0;
+        if (totalAmount === -1 || advancePaid === -1) {
+            remainingAmount = -1;
+        } else {
+            remainingAmount = totalAmount - advancePaid;
+        }
 
         let karigarName = '';
         let trackingNumber = '';
@@ -212,10 +227,12 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
             }
             
             // Success Response
+            const formatDisp = (val) => (val === -1) ? 'TBD' : (val || 0).toLocaleString();
+
             let responseText = `✅ *${commandType} Created!* (ID: ${this.lastID})\n` +
                                `👤 ${firstName} ${lastName}\n` +
                                `📱 ${mobile}\n` +
-                               `💰 Bal: ${(remainingAmount || 0).toLocaleString()}`;
+                               `💰 Bal: ${formatDisp(remainingAmount)}`;
             
             if (commandType === 'Repair' && karigarName) responseText += `\n🔨 Karigar: ${karigarName}`;
             if (commandType === 'Delivery' && trackingNumber) responseText += `\n📦 AWB: ${trackingNumber}`;

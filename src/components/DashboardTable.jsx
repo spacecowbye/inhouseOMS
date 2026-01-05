@@ -480,15 +480,22 @@ const DashboardTable = ({
 
                       {/* PAYMENT */}
                       <td className="px-4 py-4 hidden md:table-cell">
-                        <div className="text-sm font-semibold text-gray-900">
-                          ₹{order.totalAmount?.toLocaleString()}
-                        </div>
-                        <div className="text-xs text-green-600">
-                          Adv: ₹{order.advancePaid?.toLocaleString()}
-                        </div>
-                        <div className="text-xs text-red-600">
-                          Bal: ₹{order.remainingAmount?.toLocaleString()}
-                        </div>
+                        {(() => {
+                          const formatVal = (v) => (v === -1) ? "To Be Determined" : `₹${(v || 0).toLocaleString()}`;
+                          return (
+                            <>
+                              <div className="text-sm font-semibold text-gray-900">
+                                {formatVal(order.totalAmount)}
+                              </div>
+                              <div className="text-xs text-green-600">
+                                Adv: {formatVal(order.advancePaid)}
+                              </div>
+                              <div className="text-xs text-red-600">
+                                Bal: {formatVal(order.remainingAmount)}
+                              </div>
+                            </>
+                          );
+                        })()}
                       </td>
 
                       {/* ORDER RECEIVED */}

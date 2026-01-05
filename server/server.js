@@ -578,6 +578,8 @@ app.get('/api/orders/:id/invoice', async (req, res) => {
             // --- TABLE ROW ---
             let rowY = rowTop + 15;
             
+            const formatDisp = (val) => (val === -1) ? 'To Be Determined' : (val || 0).toLocaleString('en-IN');
+            
             doc.font('Helvetica').fontSize(10);
             drawText('1', 50, rowY, 30, 'center');
 
@@ -599,7 +601,7 @@ app.get('/api/orders/:id/invoice', async (req, res) => {
             }
 
             doc.text(order.notes || (order.type === 'Repair' ? 'Repair Work' : 'Jewelry Item'), 220, rowY, { width: 220 });
-            doc.text(order.totalAmount ? order.totalAmount.toLocaleString('en-IN') : '0', 450, rowY, { width: 90, align: 'right' });
+            doc.text(formatDisp(order.totalAmount), 450, rowY, { width: 90, align: 'right' });
 
             // Row Bottom
             const rowHeight = 120; 
@@ -614,7 +616,7 @@ app.get('/api/orders/:id/invoice', async (req, res) => {
             const trY = totalRowY + 8;
             doc.font('Helvetica-Bold');
             doc.text('Repair Amount', 300, trY, { width: 140, align: 'right' });
-            doc.text(order.totalAmount ? order.totalAmount.toLocaleString('en-IN') : '0', 450, trY, { width: 90, align: 'right' });
+            doc.text(formatDisp(order.totalAmount), 450, trY, { width: 90, align: 'right' });
 
             const footerTop = totalRowY + 35; // Leave some space
 
@@ -652,12 +654,12 @@ app.get('/api/orders/:id/invoice', async (req, res) => {
                 doc.text(value, 450, y, { width: 90, align: 'right' });
             };
 
-            drawBreakdownRow('Repair Amount', order.totalAmount?.toLocaleString('en-IN') || '0', breakdownY, true);
+            drawBreakdownRow('Repair Amount', formatDisp(order.totalAmount), breakdownY, true);
             // Line under gross
             doc.moveTo(350, breakdownY + 12).lineTo(540, breakdownY + 12).stroke();
             
-            drawBreakdownRow('Advance', order.advancePaid?.toLocaleString('en-IN') || '0', breakdownY + 20);
-            drawBreakdownRow('Balance', order.remainingAmount?.toLocaleString('en-IN') || '0', breakdownY + 35, true);
+            drawBreakdownRow('Advance', formatDisp(order.advancePaid), breakdownY + 20);
+            drawBreakdownRow('Balance', formatDisp(order.remainingAmount), breakdownY + 35, true);
 
             // Footer Note
             doc.fontSize(8).font('Helvetica-Oblique').text('This is an Electronically Generated Invoice.', 50, 750, { align: 'center', width: 500 });
