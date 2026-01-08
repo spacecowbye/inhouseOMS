@@ -41,6 +41,7 @@ function timeToSlotIndex(timeStr) {
 
 // Convert slotIndex → time range
 function slotIndexToTime(slotIndex) {
+    if (slotIndex === null || slotIndex === undefined) return '';
     const totalMinutes = slotIndex * SLOT_MINUTES;
     const startHour = WORK_START_HOUR + Math.floor(totalMinutes / 60);
     const startMin = totalMinutes % 60;
@@ -55,6 +56,7 @@ function slotIndexToTime(slotIndex) {
 }
 
 function slotIndexToTimeRange(slotIndex) {
+    if (slotIndex === null || slotIndex === undefined) return '';
     const totalMinutes = slotIndex * SLOT_MINUTES;
     const startHour = WORK_START_HOUR + Math.floor(totalMinutes / 60);
     const startMin = totalMinutes % 60;
@@ -216,20 +218,21 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                           `*Example:*\n/delivery Priya, 9876543210, 56 Park Ave, 20000, 20000, TRACK123, Ship urgent`;
             } else if (lowerText.includes('appointment') || lowerText.startsWith('/a')) {
                 helpMsg = `📹 *VIDEO CALL Appointment*\n${sepInfo}\n\n` +
-                          `*Command:*\n/a Name, Mobile, Time [Today/Tomorrow], Notes\n\n` +
-                          `*Example:*\n/a Rahul, 9876543210, 11:30 AM Tomorrow, Show Rings\n\n` +
-                          `💡 Defaults to *Today*. Only Today & Tomorrow supported.`;
+                          `*Command:*\n/a Name, Mobile, Time, Notes\n\n` +
+                          `*Strict Time Format:* HH:MM AM/PM\n` +
+                          `*Example:* /a Rahul, 9876543210, 11:30 AM, Show Rings\n\n` +
+                          `💡 *Keywords:*\n` +
+                          `• Use *Tomorrow* in time: /a Rahul, 9876543210, 11:30 AM Tomorrow\n` +
+                          `• Shortcut for tomorrow: */at* Name, Mobile, Time, Notes`;
             } else {
                 // General Help
                 helpMsg = `👋 *Jewelry Bot Help*\n\n` +
-                          `To see the format for a specific type, send one of these commands:\n\n` +
-                          `👉 */help order* (New Orders)\n` +
-                          `👉 */help repair* (Repairs)\n` +
-                          `👉 */help delivery* (Shipments)\n` +
-                          `👉 */a* (Video Call Appointment)\n` +
-                          `👉 */slots* (Check availability)\n` +
-                          `👉 */reschedule* (Clear a slot)\n\n` +
-                          `⚠️ Always use COMMAS ( , ) to separate details.`;
+                          `👉 */a* (Appointment Today)\n` +
+                          `👉 */at* (Appointment Tomorrow)\n` +
+                          `👉 */slots* (Check Today)\n` +
+                          `👉 */slots tomorrow* (Check Tomorrow)\n` +
+                          `👉 */reschedule* (Clear a slot)\n` +
+                          `👉 */help order/repair/delivery* for more.`;
             }
 
             res.set('Content-Type', 'text/xml');
@@ -401,6 +404,10 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
         if (lowerText.startsWith('/order')) commandType = 'Order';
         else if (lowerText.startsWith('/repair')) commandType = 'Repair';
         else if (lowerText.startsWith('/delivery')) commandType = 'Delivery';
+        else if (lowerText.startsWith('/at ') || lowerText === '/at') {
+            commandType = 'Appointment';
+            req.isTomorrow = true;
+        }
         else if (lowerText.startsWith('/a ') || lowerText === '/a' || lowerText.startsWith('/appointment') || lowerText.startsWith('/vc')) commandType = 'Appointment';
 
         if (!commandType) {
@@ -473,9 +480,9 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
             const aMobile = args[1] || '';
             let rawTime = (args[2] || '').trim().toLowerCase();
             
-            // Check for Tomorrow keyword
+            // Check for Tomorrow keyword or /at flag
             let targetDate = today;
-            if (rawTime.includes('tomorrow')) {
+            if (req.isTomorrow || rawTime.includes('tomorrow')) {
                 const tomorrow = new Date();
                 tomorrow.setDate(tomorrow.getDate() + 1);
                 targetDate = tomorrow.toISOString().split('T')[0];
@@ -484,31 +491,34 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                 rawTime = rawTime.replace('today', '').trim();
             }
 
-            // Normalize time (e.g. 11:30pm -> 11:30 PM, 11am -> 11:00 AM)
-            let formattedTime = '';
-            const timeMatch = rawTime.match(/(\d{1,2})(?::(\d{2}))?\s*([ap]m)?/);
-            if (timeMatch) {
-                let hour = timeMatch[1];
-                let min = timeMatch[2] || '00';
-                let ampm = (timeMatch[3] || '').toUpperCase();
-                
-                if (!ampm) {
-                    const hNum = parseInt(hour);
-                    if (hNum >= 11 && hNum <= 12) ampm = 'AM';
-                    else if (hNum >= 1 && hNum <= 8) ampm = 'PM';
-                    else ampm = 'AM'; 
-                }
-                formattedTime = `${hour}:${min} ${ampm}`;
+            // Fallback for empty rawTime if commas were used oddly
+            if (!rawTime && args[3] && args[3].match(/\d/)) {
+                rawTime = args[3].trim();
+                notes = args.slice(4).join(', ');
             } else {
-                formattedTime = rawTime.toUpperCase(); // Fallback
+                notes = args.slice(3).join(', ');
+            }
+
+            // STRICT TIME PARSING (Must be HH:MM AM/PM)
+            const strictMatch = rawTime.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+            if (!strictMatch) {
+                res.set('Content-Type', 'text/xml');
+                return res.send(`<Response><Message>❌ *Strict Time Format Required*\nPlease use the format: *HH:MM AM/PM*\nExample: *11:30 AM* or *04:00 PM*</Message></Response>`);
+            }
+
+            const hour = strictMatch[1];
+            const min = strictMatch[2];
+            const ampm = strictMatch[3].toUpperCase();
+            const formattedTime = `${hour}:${min} ${ampm}`;
+
+            // Calculate slotIndex
+            const slotIdx = timeToSlotIndex(formattedTime);
+            if (slotIdx === null) {
+                res.set('Content-Type', 'text/xml');
+                return res.send(`<Response><Message>❌ *Time Out of Bounds*\nPlease specify a valid time between 11:00 AM and 08:00 PM.</Message></Response>`);
             }
 
             appointmentDate = targetDate;
-            appointmentTime = formattedTime;
-            notes = args.slice(3).join(', ');
-            
-            // Calculate slotIndex
-            const slotIdx = timeToSlotIndex(formattedTime);
             appointmentTime = slotIndexToTime(slotIdx) || formattedTime; // Normalizing display
             
             req.slotIndex = slotIdx; // Pass to insert
