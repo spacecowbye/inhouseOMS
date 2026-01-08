@@ -6,6 +6,8 @@ import TableControls from "./components/TableControls";
 import OrderForm from "./components/OrderForm";
 import DashboardTable from "./components/DashboardTable";
 import LoginScreen from "./components/LoginScreen";
+import CalendarView from "./components/CalendarView";
+import { LayoutList, Calendar as CalendarIcon } from "lucide-react";
 
 const API_BASE_URL = "/api/orders";
 const DEBOUNCE_DELAY_MS = 300;
@@ -19,6 +21,7 @@ const App = () => {
   const [orders, setOrders] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [appointments, setAppointments] = useState([]);
 
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authError, setAuthError] = useState(null);
@@ -36,6 +39,7 @@ const App = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("Active");
   const [typeFilter, setTypeFilter] = useState("All");
+  const [view, setView] = useState("list"); // 'list' or 'calendar'
 
   const filterRef = useRef({ searchTerm, statusFilter, typeFilter });
   const timeoutRef = useRef(null);
@@ -140,6 +144,21 @@ const App = () => {
     }
   }, [orders.length, sortBy, sortDirection, authCredentials, getAuthHeader]);
 
+  const fetchAppointments = useCallback(async () => {
+    if (!authCredentials) return;
+    try {
+      const response = await fetch('/api/appointments', {
+        headers: getAuthHeader(),
+      });
+      if (response.ok) {
+        const result = await response.json();
+        setAppointments(result.data);
+      }
+    } catch (err) {
+      console.error('Error fetching appointments:', err);
+    }
+  }, [authCredentials, getAuthHeader]);
+
   useEffect(() => {
     const stored = localStorage.getItem('jewelry_dashboard_auth');
     if (stored) {
@@ -151,8 +170,9 @@ const App = () => {
   useEffect(() => {
     if (isAuthenticated) {
       fetchOrders(sortBy, sortDirection);
+      fetchAppointments();
     }
-  }, [fetchOrders, sortBy, sortDirection, isAuthenticated]);
+  }, [fetchOrders, fetchAppointments, sortBy, sortDirection, isAuthenticated]);
 
   useEffect(() => {
     filterRef.current = { searchTerm, statusFilter, typeFilter };
@@ -377,12 +397,31 @@ const App = () => {
             </p>
           </div>
 
-          <button
-            onClick={handleLogout}
-            className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition shadow-md"
-          >
-            Logout
-          </button>
+          <div className="flex gap-2">
+            <div className="flex bg-gray-200 p-1 rounded-lg shadow-inner mr-2">
+              <button
+                onClick={() => setView('list')}
+                className={`p-2 rounded-md transition-all ${view === 'list' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
+                title="List View"
+              >
+                <LayoutList size={20} />
+              </button>
+              <button
+                onClick={() => setView('calendar')}
+                className={`p-2 rounded-md transition-all ${view === 'calendar' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
+                title="7-Day Calendar View"
+              >
+                <CalendarIcon size={20} />
+              </button>
+            </div>
+
+            <button
+              onClick={handleLogout}
+              className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition shadow-md"
+            >
+              Logout
+            </button>
+          </div>
         </div>
 
         {error && (
@@ -418,17 +457,21 @@ const App = () => {
           />
         )}
 
-        {/* Orders Table */}
-        <DashboardTable
-          orders={displayOrders}
-          handleEdit={handleEdit}
-          handleDelete={handleDeleteConfirmation}  // <-- UPDATED
-          sortBy={sortBy}
-          sortDirection={sortDirection}
-          handleColumnSort={handleColumnSort}
-          isLoading={isLoading}
-          authHeaders={getAuthHeader()}
-        />
+        {/* Orders List/Calendar */}
+        {view === 'list' ? (
+          <DashboardTable
+            orders={displayOrders}
+            handleEdit={handleEdit}
+            handleDelete={handleDeleteConfirmation}
+            sortBy={sortBy}
+            sortDirection={sortDirection}
+            handleColumnSort={handleColumnSort}
+            isLoading={isLoading}
+            authHeaders={getAuthHeader()}
+          />
+        ) : (
+          <CalendarView orders={displayOrders} appointments={appointments} />
+        )}
 
         {/* Footer */}
         <div className="text-center mt-4 text-sm text-gray-600">

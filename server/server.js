@@ -15,7 +15,7 @@ const __dirname = dirname(__filename)
 
 const sqlite = sqlite3.verbose();
 const app = express();
-import { handleTwilioMessage } from "./whatsappBot.js" // Import Twilio Handler
+import { handleTwilioMessage, initReminders } from "./whatsappBot.js" // Import Twilio Handler
 const PORT = 3001;
 
 // --- LOGGING HELPER ---
@@ -191,6 +191,30 @@ const db = new sqlite.Database(dbPath, (err) => {
                 console.error("[FATAL] Error creating table:", err.message);
                 process.exit(1);
             }
+            // Create appointments table
+            db.run(`
+                CREATE TABLE IF NOT EXISTS appointments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    firstName TEXT,
+                    lastName TEXT,
+                    mobile TEXT,
+                    date TEXT,
+                    time TEXT,
+                    slotIndex INTEGER,
+                    creatorNumber TEXT,
+                    notes TEXT,
+                    createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            `, (err) => {
+                if (err) console.error("[ERROR] Error creating appointments table:", err.message);
+                else {
+                    console.log("[INFO] Appointments table ready.");
+                    // Ensure columns exist
+                    db.run("ALTER TABLE appointments ADD COLUMN slotIndex INTEGER", () => {});
+                    db.run("ALTER TABLE appointments ADD COLUMN creatorNumber TEXT", () => {});
+                }
+            });
+
             console.log("[INFO] Orders table ready.");
         });
     }
@@ -673,9 +697,37 @@ app.get('/api/orders/:id/invoice', async (req, res) => {
         }
     });
 });
+// --- APPOINTMENTS API ---
+app.get('/api/appointments', (req, res) => {
+    const sql = "SELECT * FROM appointments ORDER BY date ASC, time ASC";
+    db.all(sql, [], (err, rows) => {
+        if (err) return handleServerError(res, err, "Failed to fetch appointments");
+        res.json({ status: "success", data: rows });
+    });
+});
+
+app.post('/api/appointments', (req, res) => {
+    const { firstName, lastName, mobile, date, time, notes } = req.body;
+    const sql = `INSERT INTO appointments (firstName, lastName, mobile, date, time, notes) VALUES (?, ?, ?, ?, ?, ?)`;
+    db.run(sql, [firstName, lastName, mobile, date, time, notes], function(err) {
+        if (err) return handleServerError(res, err, "Failed to create appointment");
+        res.json({ status: "success", id: this.lastID });
+    });
+});
+
+app.delete('/api/appointments/:id', (req, res) => {
+    db.run("DELETE FROM appointments WHERE id = ?", [req.params.id], (err) => {
+        if (err) return handleServerError(res, err, "Failed to delete appointment");
+        res.json({ status: "success" });
+    });
+});
+
 // -----------------------------------
 // --- START SERVER ---
 app.listen(PORT, () => {
     log(`[INFO] Server running on http://localhost:${PORT}`);
     log(`[INFO] API available at http://localhost:${PORT}/api/orders`);
+    
+    // Initialize reminders for upcoming appointments
+    initReminders(db);
 });
