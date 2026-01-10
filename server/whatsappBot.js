@@ -99,12 +99,15 @@ function scheduleReminder({
 }) {
     if (slotIndex === null || slotIndex === undefined) return;
     
-    const [year, month, day] = appointmentDate.split('-').map(Number);
     const slotStartMinutes = slotIndex * SLOT_MINUTES;
     const hour = WORK_START_HOUR + Math.floor(slotStartMinutes / 60);
     const minute = slotStartMinutes % 60;
 
-    const appointmentTime = new Date(year, month - 1, day, hour, minute);
+    const hourStr = hour.toString().padStart(2, '0');
+    const minStr = minute.toString().padStart(2, '0');
+    
+    // Force IST (+05:30) regardless of server local time
+    const appointmentTime = new Date(`${appointmentDate}T${hourStr}:${minStr}:00+05:30`);
     const reminderTime = new Date(appointmentTime.getTime() - 10 * 60 * 1000); // 10 mins before
 
     const delay = reminderTime.getTime() - Date.now();
@@ -150,10 +153,10 @@ function scheduleReminder({
 }
 
 export const initReminders = (db) => {
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowStr = tomorrow.toISOString().split('T')[0];
+    const tomorrowStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(tomorrow);
 
     log('[REMINDER] Initializing reminders from DB...');
     db.all("SELECT * FROM appointments WHERE date IN (?, ?) AND slotIndex IS NOT NULL", [todayStr, tomorrowStr], (err, rows) => {
@@ -198,7 +201,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
         if (!Body) return res.status(200).send('<Response></Response>');
 
         log(`[TWILIO] Msg from ${From}: ${Body}`);
-        const today = new Date().toISOString().split('T')[0];
+        const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
         const text = Body.trim();
         const lowerText = text.toLowerCase();
         
@@ -242,13 +245,14 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
         // --- SLOTS AVAILABILITY COMMAND ---
         if (lowerText.startsWith('/slots')) {
             const parts = text.split(/\s+/);
-            let targetDate = new Date().toISOString().split('T')[0];
+            const todayDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+            let targetDate = todayDate;
             let dayLabel = "Today";
 
             if (parts[1] && parts[1].toLowerCase() === 'tomorrow') {
                 const tomorrow = new Date();
                 tomorrow.setDate(tomorrow.getDate() + 1);
-                targetDate = tomorrow.toISOString().split('T')[0];
+                targetDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(tomorrow);
                 dayLabel = "Tomorrow";
             }
 
@@ -289,7 +293,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
             });
             return;
         }
-
+        
         // --- RESCHEDULE / CLEAR COMMAND ---
         if (lowerText.startsWith('/reschedule')) {
             const parts = text.split(/\s+/);
@@ -300,14 +304,14 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                 return res.send(`<Response><Message>❌ Please specify a time.\nExample: */reschedule 11:30 AM*</Message></Response>`);
             }
 
-            let targetDate = new Date().toISOString().split('T')[0];
+            let targetDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
             let cleanTime = rawTime;
             let dayLabel = "Today";
 
             if (rawTime.includes('tomorrow')) {
                 const tomorrow = new Date();
                 tomorrow.setDate(tomorrow.getDate() + 1);
-                targetDate = tomorrow.toISOString().split('T')[0];
+                targetDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(tomorrow);
                 cleanTime = rawTime.replace('tomorrow', '').trim();
                 dayLabel = "Tomorrow";
             }
@@ -485,7 +489,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
             if (req.isTomorrow || rawTime.includes('tomorrow')) {
                 const tomorrow = new Date();
                 tomorrow.setDate(tomorrow.getDate() + 1);
-                targetDate = tomorrow.toISOString().split('T')[0];
+                targetDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(tomorrow);
                 rawTime = rawTime.replace('tomorrow', '').trim();
             } else if (rawTime.includes('today')) {
                 rawTime = rawTime.replace('today', '').trim();
