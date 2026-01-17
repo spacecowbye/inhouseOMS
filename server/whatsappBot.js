@@ -221,12 +221,13 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                           `*Example:*\n/delivery Priya, 9876543210, 56 Park Ave, 20000, 20000, TRACK123, Ship urgent`;
             } else if (lowerText.includes('appointment') || lowerText.startsWith('/a')) {
                 helpMsg = `📹 *VIDEO CALL Appointment*\n${sepInfo}\n\n` +
-                          `*Command:*\n/a Name, Mobile, Time, Notes\n\n` +
-                          `*Strict Time Format:* HH:MM AM/PM\n` +
-                          `*Example:* /a Rahul, 9876543210, 11:30 AM, Show Rings\n\n` +
-                          `💡 *Keywords:*\n` +
-                          `• Use *Tomorrow* in time: /a Rahul, 9876543210, 11:30 AM Tomorrow\n` +
-                          `• Shortcut for tomorrow: */at* Name, Mobile, Time, Notes`;
+                          `*Command:*\n/a Name, Mobile, Time, Notes, Date\n\n` +
+                          `*Format Info:*\n` +
+                          `• *Time:* HH:MM AM/PM (Strict)\n` +
+                          `• *Date:* DD-MM (Optional, defaults to Today)\n\n` +
+                          `*Example:*\n/a Rahul, 9876543210, 11:30 AM, Show Rings, 20-01\n\n` +
+                          `💡 *Shortcuts:*\n` +
+                          `• */at* ... is a shortcut for Tomorrow.`;
             } else {
                 // General Help
                 helpMsg = `👋 *Jewelry Bot Help*\n\n` +
@@ -479,14 +480,34 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
             trackingNumber = args[5] || '';
             notes = args.slice(6).join(', ');
         } else if (commandType === 'Appointment') {
-            // Format: /a Name, Mobile, Time [Today/Tomorrow], Notes
+            // Format: /a Name, Mobile, Time, Notes, Date
             const aName = args[0] || 'Unknown';
             const aMobile = args[1] || '';
             let rawTime = (args[2] || '').trim().toLowerCase();
+            let rawDate = (args[4] || '').trim(); // 5th argument is specifically for Date
             
-            // Check for Tomorrow keyword or /at flag
+            // Notes logic: If we have a 5th arg that is NOT a date, it might be more notes? 
+            // But let's follow the user's strict structure.
+            notes = (args[3] || '').trim(); 
+            
+            // Check for explicit date in the 5th arg first
             let targetDate = today;
-            if (req.isTomorrow || rawTime.includes('tomorrow')) {
+            const datePattern = /(\d{1,2})-(\d{1,2})/;
+            const dateMatchArg4 = rawDate.match(datePattern);
+            const dateMatchArg2 = rawTime.match(datePattern);
+
+            if (dateMatchArg4) {
+                const day = dateMatchArg4[1].padStart(2, '0');
+                const month = dateMatchArg4[2].padStart(2, '0');
+                const year = new Date().getFullYear();
+                targetDate = `${year}-${month}-${day}`;
+            } else if (dateMatchArg2) {
+                const day = dateMatchArg2[1].padStart(2, '0');
+                const month = dateMatchArg2[2].padStart(2, '0');
+                const year = new Date().getFullYear();
+                targetDate = `${year}-${month}-${day}`;
+                rawTime = rawTime.replace(dateMatchArg2[0], '').trim();
+            } else if (req.isTomorrow || rawTime.includes('tomorrow') || rawDate.toLowerCase().includes('tomorrow')) {
                 const tomorrow = new Date();
                 tomorrow.setDate(tomorrow.getDate() + 1);
                 targetDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(tomorrow);
@@ -495,12 +516,10 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                 rawTime = rawTime.replace('today', '').trim();
             }
 
-            // Fallback for empty rawTime if commas were used oddly
-            if (!rawTime && args[3] && args[3].match(/\d/)) {
-                rawTime = args[3].trim();
-                notes = args.slice(4).join(', ');
-            } else {
-                notes = args.slice(3).join(', ');
+            // Strict fallback: if they put the time in the Notes slot by mistake
+            if (!rawTime.match(/\d/) && notes.match(/\d/)) {
+                rawTime = notes;
+                notes = (args[4] || '');
             }
 
             // STRICT TIME PARSING (Must be HH:MM AM/PM)
