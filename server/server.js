@@ -374,7 +374,7 @@ app.get('/api/orders', (req, res) => {
                 data: rows,
                 stats: {
                     total: statsRow.total, received: statsRow.received, inWorkshop: statsRow.inWorkshop, 
-                    ready: statsRow.ready, delivered: statsRow.delivered,
+                    ready: statsRow.ready, delivered: statsRow.delivered, outForDelivery: statsRow.outForDelivery,
                 },
             });
         });
