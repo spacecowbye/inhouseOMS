@@ -14,6 +14,7 @@ import {
   extractCity,
   getStatusColor,
   getTypeColor,
+  getStatus,
 } from "../utils/dataUtils";
 import {
   formatDateWithDays,
@@ -326,15 +327,7 @@ const DashboardTable = ({
                 ))
               ) : (
                 orders.map((order) => {
-                  const status =
-                    order.status ||
-                    (order.collectedByCustomerDate
-                      ? "Delivered"
-                      : order.returnedFromWorkshopDate
-                        ? "Ready for Pickup"
-                        : order.sentToWorkshopDate
-                          ? "In Workshop"
-                          : "Order Received");
+                  const status = order.status || getStatus(order);
 
                   const showroomDays = calculateShowroomDays(
                     order.returnedFromWorkshopDate,
