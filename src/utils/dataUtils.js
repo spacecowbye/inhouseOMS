@@ -9,6 +9,7 @@ export const extractCity = (address) => {
 
 export const getStatus = (order) => {
     if (order.collectedByCustomerDate) return "Delivered";
+    if (order.type === 'Delivery' && order.shippingDate && !order.collectedByCustomerDate) return "Out for Delivery";
     if (order.returnedFromWorkshopDate) return "Ready for Pickup";
     if (order.sentToWorkshopDate) return "In Workshop";
     return "Order Received";
@@ -23,6 +24,8 @@ export const getStatusColor = (status) => {
             return "bg-yellow-100 text-yellow-800 border-yellow-300";
         case "Ready for Pickup":
             return "bg-green-100 text-green-800 border-green-300";
+        case "Out for Delivery":
+            return "bg-indigo-100 text-indigo-800 border-indigo-300";
         case "Delivered":
             return "bg-gray-100 text-gray-800 border-gray-300";
         default:
@@ -46,7 +49,7 @@ export const getTypeColor = (type) => {
 
 export const calculateStats = (orders) => {
     const stats = {
-        total: 0, received: 0, inWorkshop: 0, ready: 0, delivered: 0,
+        total: 0, received: 0, inWorkshop: 0, ready: 0, delivered: 0, outForDelivery: 0,
     };
     orders.forEach(o => {
         const status = getStatus(o);
@@ -57,6 +60,7 @@ export const calculateStats = (orders) => {
             if (status === "Order Received") stats.received++;
             if (status === "In Workshop") stats.inWorkshop++;
             if (status === "Ready for Pickup") stats.ready++;
+            if (status === "Out for Delivery") stats.outForDelivery++;
         }
     });
     return stats;

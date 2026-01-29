@@ -309,13 +309,9 @@ const DashboardTable = ({
                   Workshop Timeline
                 </SortableHeader>
 
-                <SortableHeader
-                  column="returnedFromWorkshopDate"
-                  className="hidden xl:table-cell"
-                  {...{ sortBy, sortDirection, handleColumnSort }}
-                >
-                  In Showroom Since
-                </SortableHeader>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase hidden xl:table-cell">
+                  Timeline / Shipping
+                </th>
 
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                   Actions
@@ -517,11 +513,31 @@ const DashboardTable = ({
 
                       {/* SHOWROOM */}
                       <td className="px-4 py-4 hidden xl:table-cell">
-                        <div className="text-sm font-medium text-gray-900">
-                          {showroomDays !== null
-                            ? `${Math.abs(showroomDays)} days`
-                            : "-"}
-                        </div>
+                        {order.type === "Delivery" ? (
+                          <div className="text-xs">
+                            <div className="font-semibold text-purple-700 flex items-center gap-1">
+                              <MapPin size={12} />
+                              {extractCity(order.address)}
+                            </div>
+                            <div className="text-gray-500 mt-1">
+                              Shipped: {order.shippingDate ? formatDate(order.shippingDate) : "TBD"}
+                            </div>
+                            {order.trackingNumber && (
+                              <div
+                                onClick={() => handleTrackOrder(order.trackingNumber)}
+                                className="text-blue-600 mt-1 cursor-pointer hover:underline text-[10px]"
+                              >
+                                {order.trackingNumber}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="text-sm font-medium text-gray-900">
+                            {showroomDays !== null
+                              ? `${Math.abs(showroomDays)} days in showroom`
+                              : "-"}
+                          </div>
+                        )}
                       </td>
 
                       {/* ACTIONS */}

@@ -23,36 +23,26 @@ function normalizeMobile(mobile) {
     return clean;
 }
 
-// Convert time string → slotIndex
+// Convert time string → slotIndex (24-hour format: HH:MM)
 function timeToSlotIndex(timeStr) {
-    const match = timeStr.match(/(\d{1,2})(?::(\d{2}))?\s*([ap]m)/i);
+    const match = timeStr.match(/^(\d{1,2})(?::(\d{2}))?$/);
     if (!match) return null;
     
     let hour = parseInt(match[1]);
     const min = parseInt(match[2] || '0');
-    const ampm = match[3].toLowerCase();
-
-    if (ampm === 'pm' && hour < 12) hour += 12;
-    if (ampm === 'am' && hour === 12) hour = 0;
 
     if (hour < WORK_START_HOUR || hour >= WORK_END_HOUR) return null;
     return ((hour - WORK_START_HOUR) * 2) + (min >= 30 ? 1 : 0);
 }
 
-// Convert slotIndex → time range
+// Convert slotIndex → HH:MM (24-hour)
 function slotIndexToTime(slotIndex) {
     if (slotIndex === null || slotIndex === undefined) return '';
     const totalMinutes = slotIndex * SLOT_MINUTES;
-    const startHour = WORK_START_HOUR + Math.floor(totalMinutes / 60);
-    const startMin = totalMinutes % 60;
+    const h = WORK_START_HOUR + Math.floor(totalMinutes / 60);
+    const m = totalMinutes % 60;
 
-    const fmt = (h, m) => {
-        const ampm = h >= 12 ? 'PM' : 'AM';
-        const hh = ((h + 11) % 12 + 1);
-        return `${hh}:${m.toString().padStart(2, '0')} ${ampm}`;
-    };
-
-    return fmt(startHour, startMin);
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
 }
 
 function slotIndexToTimeRange(slotIndex) {
@@ -65,12 +55,7 @@ function slotIndexToTimeRange(slotIndex) {
     const endHour = WORK_START_HOUR + Math.floor(endTotalMinutes / 60);
     const endMin = endTotalMinutes % 60;
 
-    const fmt = (h, m) => {
-        const actualAmPm = h >= 12 ? 'pm' : 'am';
-        let hh = h % 12;
-        if (hh === 0) hh = 12;
-        return `${hh}:${m.toString().padStart(2, '0')} ${actualAmPm}`;
-    };
+    const fmt = (h, m) => `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
 
     return `${fmt(startHour, startMin)} - ${fmt(endHour, endMin)}`;
 }
@@ -223,11 +208,11 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                 helpMsg = `📹 *VIDEO CALL Appointment*\n${sepInfo}\n\n` +
                           `*Command:*\n/a Name, Mobile, Time, Notes, Date\n\n` +
                           `*Format Info:*\n` +
-                          `• *Time:* HH:MM AM/PM (Strict)\n` +
+                          `• *Time:* HH:MM (24-hour, e.g., 14:30)\n` +
                           `• *Date:* DD-MM (Optional, defaults to Today)\n\n` +
-                          `*Example:*\n/a Rahul, 9876543210, 11:30 AM, Show Rings, 20-01\n\n` +
+                          `*Example:*\n/a Rahul, 9876543210, 11:30, Show Rings, 18-01\n\n` +
                           `💡 *Shortcuts:*\n` +
-                          `• */at* ... is a shortcut for Tomorrow.`;
+                          `• */at* ... Name, Mobile, Time, Notes (Today/Tomorrow defaults)`;
             } else {
                 // General Help
                 helpMsg = `👋 *Jewelry Bot Help*\n\n` +
@@ -302,7 +287,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
             
             if (!rawTime) {
                 res.set('Content-Type', 'text/xml');
-                return res.send(`<Response><Message>❌ Please specify a time.\nExample: */reschedule 11:30 AM*</Message></Response>`);
+                return res.send(`<Response><Message>❌ Please specify a time.\nExample: */reschedule 11:30*</Message></Response>`);
             }
 
             let targetDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
@@ -428,7 +413,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
         // Basic Validation (Name & Mobile are strictly required)
         if (!content.includes(',')) {
              res.set('Content-Type', 'text/xml');
-             return res.send(`<Response><Message>❌ *Comma Missing*\nYou MUST use COMMAS ( , ) to separate details.\nExample: */a Rahul, 9876543210, 11:30 AM, Ring*</Message></Response>`);
+             return res.send(`<Response><Message>❌ *Comma Missing*\nYou MUST use COMMAS ( , ) to separate details.\nExample: */a Rahul, 9876543210, 11:30, Ring*</Message></Response>`);
         }
 
         if (args.length < 2) {
@@ -522,17 +507,16 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                 notes = (args[4] || '');
             }
 
-            // STRICT TIME PARSING (Must be HH:MM AM/PM)
-            const strictMatch = rawTime.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+            // STRICT TIME PARSING (Must be HH:MM)
+            const strictMatch = rawTime.match(/^(\d{1,2}):(\d{2})$/);
             if (!strictMatch) {
                 res.set('Content-Type', 'text/xml');
-                return res.send(`<Response><Message>❌ *Strict Time Format Required*\nPlease use the format: *HH:MM AM/PM*\nExample: *11:30 AM* or *04:00 PM*</Message></Response>`);
+                return res.send(`<Response><Message>❌ *Strict Time Format Required*\nPlease use the 24-hour format: *HH:MM*\nExample: *11:30* or *16:00*</Message></Response>`);
             }
 
-            const hour = strictMatch[1];
-            const min = strictMatch[2];
-            const ampm = strictMatch[3].toUpperCase();
-            const formattedTime = `${hour}:${min} ${ampm}`;
+            const hour = strictMatch[1].padStart(2, '0');
+            const min = strictMatch[2].padStart(2, '0');
+            const formattedTime = `${hour}:${min}`;
 
             // Calculate slotIndex
             const slotIdx = timeToSlotIndex(formattedTime);
@@ -607,15 +591,16 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                 firstName, lastName, mobile, address, 
                 totalAmount, advancePaid, remainingAmount, 
                 type, karigarName, trackingNumber, notes, 
-                photoUrl, orderReceivedDate
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                photoUrl, orderReceivedDate, shippingDate
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
 
         const values = [
             firstName, lastName, mobile, address,
             totalAmount, advancePaid, remainingAmount,
             commandType, karigarName, trackingNumber, notes,
-            photoUrl, today
+            photoUrl, today,
+            commandType === 'Delivery' ? today : null
         ];
 
         db.run(sql, values, function (err) {

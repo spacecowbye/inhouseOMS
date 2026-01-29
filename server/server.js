@@ -353,7 +353,8 @@ app.get('/api/orders', (req, res) => {
             COUNT(CASE WHEN collectedByCustomerDate IS NULL THEN 1 END) AS total,
             COUNT(CASE WHEN collectedByCustomerDate IS NULL AND returnedFromWorkshopDate IS NOT NULL THEN 1 END) AS ready,
             COUNT(CASE WHEN collectedByCustomerDate IS NULL AND returnedFromWorkshopDate IS NULL AND sentToWorkshopDate IS NOT NULL THEN 1 END) AS inWorkshop,
-            COUNT(CASE WHEN collectedByCustomerDate IS NULL AND returnedFromWorkshopDate IS NULL AND sentToWorkshopDate IS NULL THEN 1 END) AS received
+            COUNT(CASE WHEN collectedByCustomerDate IS NULL AND type = 'Delivery' AND shippingDate IS NOT NULL THEN 1 END) AS outForDelivery,
+            COUNT(CASE WHEN collectedByCustomerDate IS NULL AND returnedFromWorkshopDate IS NULL AND sentToWorkshopDate IS NULL AND (type != 'Delivery' OR shippingDate IS NULL) THEN 1 END) AS received
         FROM orders
     `;
 

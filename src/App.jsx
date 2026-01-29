@@ -28,7 +28,7 @@ const App = () => {
   const [authCredentials, setAuthCredentials] = useState(null);
 
   const [globalStats, setGlobalStats] = useState({
-    total: 0, received: 0, inWorkshop: 0, ready: 0, delivered: 0,
+    total: 0, received: 0, inWorkshop: 0, ready: 0, delivered: 0, outForDelivery: 0
   });
 
   const [sortBy, setSortBy] = useState("orderReceivedDate");
@@ -220,6 +220,14 @@ const App = () => {
 
     setFormData(prev => {
       const updated = { ...prev, [name]: value };
+
+      // Auto-set dates for Delivery type if they are empty
+      if (name === "type" && value === "Delivery") {
+        const todayStr = new Date().toISOString().split('T')[0];
+        if (!updated.orderReceivedDate) updated.orderReceivedDate = todayStr;
+        if (!updated.shippingDate) updated.shippingDate = todayStr;
+      }
+
       if (name === "totalAmount" || name === "advancePaid") {
         const total = parseFloat(name === "totalAmount" ? value : updated.totalAmount) || 0;
         const advance = parseFloat(name === "advancePaid" ? value : updated.advancePaid) || 0;
