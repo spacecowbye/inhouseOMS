@@ -366,11 +366,12 @@ const App = () => {
 
   const displayOrders = useMemo(() => {
     return orders.filter(order => {
+      const searchLower = searchTerm.toLowerCase();
       const matchesSearch =
-        order.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.mobile.includes(searchTerm) ||
-        order.id.toString().includes(searchTerm);
+        (order.firstName || "").toLowerCase().includes(searchLower) ||
+        (order.lastName || "").toLowerCase().includes(searchLower) ||
+        (order.mobile || "").toString().includes(searchTerm) ||
+        (order.id || "").toString().includes(searchTerm);
 
       const status = getStatus(order);
       const matchesStatus =
