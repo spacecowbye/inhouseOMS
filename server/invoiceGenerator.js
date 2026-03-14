@@ -1,5 +1,4 @@
 import PDFDocument from 'pdfkit';
-import fetch from 'node-fetch';
 
 /**
  * Generates an invoice PDF for a given order and returns it as a Buffer.
