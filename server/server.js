@@ -15,7 +15,7 @@ const __dirname = dirname(__filename)
 
 const sqlite = sqlite3.verbose();
 const app = express();
-import { handleTwilioMessage, initReminders } from "./whatsappBot.js" // Import Twilio Handler
+import { handleTwilioMessage, initReminders, sendWhatsApp } from "./whatsappBot.js" // Import Twilio Handlers
 const PORT = 3001;
 
 // --- LOGGING HELPER ---
@@ -430,29 +430,59 @@ app.post('/api/orders', (req, res) => {
 // PUT update order
 app.put('/api/orders/:id', (req, res) => {
     const id = req.params.id;
-    const order = req.body;
+    const orderData = req.body;
     
-    const updateFields = Object.keys(order).filter(key => key !== 'id');
-    if (updateFields.length === 0) {
-        return res.status(400).json({ status: "error", message: "No fields provided for update." });
-    }
+    // Fetch current state to check for status transitions
+    db.get("SELECT * FROM orders WHERE id = ?", [id], (err, currentOrder) => {
+        if (err) return handleServerError(res, err, `Failed to fetch order ID: ${id}`);
+        if (!currentOrder) return res.status(404).json({ status: "error", message: `Order ID ${id} not found.` });
 
-    const setString = updateFields.map(key => `${key} = ?`).join(', ');
-    const values = updateFields.map(key => order[key]);
-    values.push(id); 
-
-    const sql = `UPDATE orders SET ${setString} WHERE id = ?`;
-
-    db.run(sql, values, function(err) {
-        if (err) {
-            return handleServerError(res, err, `Failed to update order ID: ${id}`);
+        const updateFields = Object.keys(orderData).filter(key => key !== 'id');
+        if (updateFields.length === 0) {
+            return res.status(400).json({ status: "error", message: "No fields provided for update." });
         }
-        if (this.changes === 0) {
-            console.warn(`[WARN] Attempted update on non-existent order ID: ${id}`);
-            return res.status(404).json({ status: "error", message: `Order ID ${id} not found.` });
-        }
-        console.log(`[INFO] Successfully updated order ID: ${id}. Changes: ${this.changes}`);
-        res.status(200).json({ status: "success", message: "Order updated successfully", changes: this.changes });
+
+        const setString = updateFields.map(key => `${key} = ?`).join(', ');
+        const values = updateFields.map(key => orderData[key]);
+        values.push(id); 
+
+        const sql = `UPDATE orders SET ${setString} WHERE id = ?`;
+
+        db.run(sql, values, function(err) {
+            if (err) {
+                return handleServerError(res, err, `Failed to update order ID: ${id}`);
+            }
+            if (this.changes === 0) {
+                console.warn(`[WARN] Attempted update on non-existent order ID: ${id}`);
+                return res.status(404).json({ status: "error", message: `Order ID ${id} not found.` });
+            }
+            
+            console.log(`[INFO] Successfully updated order ID: ${id}. Changes: ${this.changes}`);
+
+            // AUTOMATIC DELIVERY INVOICE logic
+            const wasDelivered = currentOrder.collectedByCustomerDate != null;
+            const isDelivered = orderData.collectedByCustomerDate != null;
+            const isRepair = (orderData.type || currentOrder.type) === 'Repair';
+
+            if (!wasDelivered && isDelivered && isRepair) {
+                const customerMobile = orderData.mobile || currentOrder.mobile;
+                const customerName = orderData.firstName || currentOrder.firstName;
+
+                if (customerMobile) {
+                    let cleanMobile = customerMobile.replace(/\D/g, '');
+                    if (cleanMobile.startsWith('0')) cleanMobile = cleanMobile.slice(1);
+                    if (cleanMobile.length === 10) cleanMobile = '91' + cleanMobile;
+
+                    const invoiceUrl = `http://deepasoms.duckdns.org/api/orders/${id}/invoice`;
+                    const message = `Hi ${customerName}, your repair order #${id} has been delivered. Please find your PAID & DELIVERED invoice below. Thank you for choosing Deepa's!`;
+                    
+                    log(`[AUTO-DELIVERY] Sending invoice to ${cleanMobile} for order ${id}`);
+                    sendWhatsApp(`whatsapp:+${cleanMobile}`, message, invoiceUrl);
+                }
+            }
+
+            res.status(200).json({ status: "success", message: "Order updated successfully", changes: this.changes });
+        });
     });
 });
 
@@ -689,6 +719,26 @@ app.get('/api/orders/:id/invoice', async (req, res) => {
             // Footer Note
             doc.fontSize(8).font('Helvetica-Oblique').text('This is an Electronically Generated Invoice.', 50, 750, { align: 'center', width: 500 });
             doc.moveTo(50, 740).lineTo(545, 740).strokeColor('#cccccc').stroke();
+
+            // --- STAMP (If Delivered) ---
+            if (order.collectedByCustomerDate) {
+                doc.save();
+                doc.fontSize(60);
+                doc.fillColor('red');
+                doc.fillOpacity(0.2);
+                
+                // Position in center
+                const stampText = 'PAID AND DELIVERED';
+                const textWidth = doc.widthOfString(stampText);
+                const textHeight = doc.currentLineHeight();
+                
+                // Center of A4 is approx 297, 420
+                doc.translate(297, 420);
+                doc.rotate(-30);
+                doc.text(stampText, -textWidth / 2, -textHeight / 2);
+                
+                doc.restore();
+            }
 
             doc.end();
 

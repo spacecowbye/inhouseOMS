@@ -60,14 +60,17 @@ function slotIndexToTimeRange(slotIndex) {
     return `${fmt(startHour, startMin)} - ${fmt(endHour, endMin)}`;
 }
 
-const sendWhatsApp = async (to, body) => {
+export const sendWhatsApp = async (to, body, mediaUrl = null) => {
     try {
-        await twilioClient.messages.create({
+        const payload = {
             from: TWILIO_FROM,
             to: to,
             body: body
-        });
-        log(`[OUTBOUND] Msg sent to ${to}`);
+        };
+        if (mediaUrl) payload.mediaUrl = [mediaUrl];
+
+        await twilioClient.messages.create(payload);
+        log(`[OUTBOUND] Msg sent to ${to}${mediaUrl ? ' (with media)' : ''}`);
     } catch (err) {
         logError(`[OUTBOUND] Error sending to ${to}:`, err.message);
     }
