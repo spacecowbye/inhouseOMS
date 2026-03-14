@@ -1,4 +1,4 @@
-import React from 'react';
+import { ShoppingBag, Wrench, Truck } from 'lucide-react';
 
 const OrderForm = ({
   formData,
@@ -9,38 +9,49 @@ const OrderForm = ({
   setEditingId,
 }) => {
   // Helper to calculate Balance dynamically
-  const balanceAmount = 
+  const balanceAmount =
     parseFloat(formData.totalAmount || 0) -
     parseFloat(formData.advancePaid || 0);
 
-  // Determine the URL for preview: use the current photoUrl from state, 
-  // which will be either the permanent S3 URL (editing) or the temporary blob URL (newly selected).
+  // Determine the URL for preview
   const previewUrl = formData.photoUrl;
 
+  const orderTypes = [
+    { id: 'Order', label: 'Order', icon: ShoppingBag, color: 'blue', activeClass: 'bg-blue-600 text-white', inactiveClass: 'bg-blue-50 text-blue-600 hover:bg-blue-100' },
+    { id: 'Repair', label: 'Repair', icon: Wrench, color: 'orange', activeClass: 'bg-orange-600 text-white', inactiveClass: 'bg-orange-50 text-orange-600 hover:bg-orange-100' },
+    { id: 'Delivery', label: 'Delivery', icon: Truck, color: 'purple', activeClass: 'bg-purple-600 text-white', inactiveClass: 'bg-purple-50 text-purple-600 hover:bg-purple-100' }
+  ];
+
   return (
-    <div className="bg-white rounded-lg shadow p-6 mb-6">
-      <h2 className="text-xl font-bold text-gray-800 mb-4">
+    <div className="bg-white rounded-lg shadow-lg p-6 mb-6 border border-gray-100">
+      <h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
+        <div className="w-2 h-8 bg-indigo-600 rounded-full"></div>
         {editingId ? "Edit Order" : "Add New Order"}
       </h2>
 
-      <div className="mb-4">
-        <label className="block text-sm font-medium text-gray-700 mb-2">
-          Order Type *
+      <div className="mb-8">
+        <label className="block text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wider">
+          Select Order Type
         </label>
-        <div className="flex gap-4">
-          {["Order", "Repair", "Delivery"].map((type) => (
-            <label key={type} className="flex items-center">
-              <input
-                type="radio"
-                name="type"
-                value={type}
-                checked={formData.type === type}
-                onChange={handleInputChange}
-                className="mr-2"
-              />
-              <span className="text-sm">{type}</span>
-            </label>
-          ))}
+        <div className="grid grid-cols-3 gap-4">
+          {orderTypes.map((type) => {
+            const Icon = type.icon;
+            const isActive = formData.type === type.id;
+            return (
+              <button
+                key={type.id}
+                type="button"
+                onClick={() => handleInputChange({ target: { name: 'type', value: type.id } })}
+                className={`flex flex-col items-center justify-center p-4 rounded-xl transition-all duration-200 border-2 ${isActive
+                    ? `${type.activeClass} border-transparent shadow-md scale-[1.02]`
+                    : `${type.inactiveClass} border-gray-100 border-dashed`
+                  }`}
+              >
+                <Icon size={24} className="mb-2" />
+                <span className="font-bold text-sm tracking-wide">{type.label}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -67,8 +78,8 @@ const OrderForm = ({
 
       {/* Financial Details */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-        <input type="number" name="totalAmount" placeholder="Total Amount (₹) *" value={formData.totalAmount} onChange={handleInputChange}  className="border border-gray-300 rounded-lg px-3 py-2" />
-        <input type="number" name="advancePaid" placeholder="Advance Paid (₹) *" value={formData.advancePaid} onChange={handleInputChange}  className="border border-gray-300 rounded-lg px-3 py-2" />
+        <input type="number" name="totalAmount" placeholder="Total Amount (₹) *" value={formData.totalAmount} onChange={handleInputChange} className="border border-gray-300 rounded-lg px-3 py-2" />
+        <input type="number" name="advancePaid" placeholder="Advance Paid (₹) *" value={formData.advancePaid} onChange={handleInputChange} className="border border-gray-300 rounded-lg px-3 py-2" />
         <input type="number" placeholder="Balance (₹)" value={balanceAmount || ""} readOnly className="border border-gray-300 rounded-lg px-3 py-2 bg-gray-50" />
       </div>
 
@@ -108,7 +119,7 @@ const OrderForm = ({
           </div>
         </div>
       )}
-      
+
       {/* NOTES FIELD */}
       <div className="mb-6">
         <label className="block text-sm font-medium text-gray-700 mb-1">Notes / Description</label>

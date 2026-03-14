@@ -196,14 +196,14 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
         // --- HELP HANDLERS ---
         const fullHelp = `🤖 *Deepa's Jewelry Bot - All Commands*\n\n` +
                          `🛠 *REPAIR:* \`/repair Name, Mobile, Address, Total, Advance, Karigar, Notes\`\n` +
-                         `🚚 *DELIVERY:* \`/delivery Name, Mobile, Address, Total, Advance, AWB, Notes\`\n` +
                          `📝 *ORDER:* \`/order Name, Mobile, Address, Total, Advance, Notes\`\n` +
-                         `📹 *APPT (Today):* \`/a Name, Mobile, Time, Notes, Date\` (Time: 14:30, Date: 15-03)\n` +
-                         `📹 *APPT (Tomorrow):* \`/at Name, Mobile, Time, Notes\`\n` +
-                         `📅 *SLOTS:* \`/slots\` or \`/slots tomorrow\`\n` +
-                         `🗑 *CLEAR SLOT:* \`/reschedule Time\` or \`/reschedule Time tomorrow\`\n` +
+                         `🚚 *DELIVERY:* \`/delivery Name, Mobile, Address, Total, Advance, AWB, Notes\`\n` +
+                         `✅ *COLLECTED:* \`/rc ID\` (Mark Collected + Stamped Invoice)\n` +
                          `📄 *INVOICE:* \`/generate ID\` (Normal PDF)\n` +
-                         `✅ *COLLECTED:* \`/rc ID\` (Mark Collected + Stamped Invoice)\n\n` +
+                         `📹 *APPT (Today):* \`/a Name, Mobile, Time, Notes, Date\`\n` +
+                         `📹 *APPT (Tmrw):* \`/at Name, Mobile, Time, Notes\`\n` +
+                         `📅 *SLOTS:* \`/slots\` or \`/slots tomorrow\`\n` +
+                         `🗑 *CLEAR SLOT:* \`/reschedule Time\`\n\n` +
                          `⚠️ *IMPORTANT:* Separate details with a COMMA ( , ) for /repair, /delivery, /order, and /a.`;
 
         // --- HELP HANDLERS ---
@@ -356,7 +356,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
             const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
 
             // 1. Update the order status to Delivered
-            db.run("UPDATE orders SET collectedByCustomerDate = ? WHERE id = ? AND type = 'Repair'", [today, orderId], function(err) {
+            db.run("UPDATE orders SET collectedByCustomerDate = ? WHERE id = ?", [today, orderId], function(err) {
                 if (err) {
                     logError('[TWILIO] DB Error:', err);
                     res.set('Content-Type', 'text/xml');
@@ -365,7 +365,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
 
                 if (this.changes === 0) {
                     res.set('Content-Type', 'text/xml');
-                    return res.send(`<Response><Message>❌ Repair Order #${orderId} not found or not a Repair.</Message></Response>`);
+                    return res.send(`<Response><Message>❌ Order #${orderId} not found.</Message></Response>`);
                 }
 
                 // 2. Fetch order details to generate response
@@ -672,6 +672,8 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                 return res.status(500).send('<Response><Message>❌ Database Error</Message></Response>');
             }
 
+            const invoiceUrl = `http://deepasoms.duckdns.org/api/orders/${this.lastID}/invoice`;
+
             // Success Response
             const formatDisp = (val) => (val === -1) ? 'TBD' : (val || 0).toLocaleString();
 
@@ -683,11 +685,19 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
             if (commandType === 'Repair' && karigarName) responseText += `\n🔨 Karigar: ${karigarName}`;
             if (commandType === 'Delivery' && trackingNumber) responseText += `\n📦 AWB: ${trackingNumber}`;
             if (photoUrl) responseText += `\n🖼 Photo Attached`;
+            
+            responseText += `\n\n📄 *Invoice:* ${invoiceUrl}`;
 
             res.set('Content-Type', 'text/xml');
-            res.send(`<Response><Message>${responseText}</Message></Response>`);
+            res.send(`
+                <Response>
+                    <Message>
+                        <Body>${responseText}</Body>
+                        ${commandType === 'Repair' ? `<Media>${invoiceUrl}</Media>` : ''}
+                    </Message>
+                </Response>
+            `);
         });
-
     } catch (e) {
         logError('[TWILIO] Error:', e);
         res.set('Content-Type', 'text/xml');
