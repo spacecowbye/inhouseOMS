@@ -24,6 +24,20 @@ function normalizeMobile(mobile) {
     return clean;
 }
 
+/**
+ * Sends a clean, escaped TwiML response to Twilio.
+ */
+function sendTwiML(res, body, mediaUrl = null) {
+    const twiml = new twilio.twiml.MessagingResponse();
+    const message = twiml.message();
+    message.body(body.trim());
+    if (mediaUrl) {
+        message.media(mediaUrl);
+    }
+    res.set('Content-Type', 'text/xml');
+    return res.send(twiml.toString());
+}
+
 // Convert time string → slotIndex (24-hour format: HH:MM)
 function timeToSlotIndex(timeStr) {
     const match = timeStr.match(/^(\d{1,2})(?::(\d{2}))?$/);
@@ -423,14 +437,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                                      `🔗 *Invoice PDF (S3 Stamped):*\n${invoiceUrl}`;
 
                     log(`[TWILIO] Sending /rc success reply for ID ${orderId} with Media: ${invoiceUrl}`);
-                    res.set('Content-Type', 'text/xml');
-                    return res.send(`<?xml version="1.0" encoding="UTF-8"?>
-                        <Response>
-                            <Message>
-                                <Body>${bodyText}</Body>
-                                <Media>${invoiceUrl}</Media>
-                            </Message>
-                        </Response>`);
+                    return sendTwiML(res, bodyText, invoiceUrl);
                 });
             });
             return;
@@ -467,14 +474,8 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                                  `👉 *Chat with Customer:*\n${waLink}\n\n` +
                                  `🔗 *Download PDF (S3):*\n${invoiceUrl}`;
 
-                res.set('Content-Type', 'text/xml');
-                return res.send(`<?xml version="1.0" encoding="UTF-8"?>
-                    <Response>
-                        <Message>
-                            <Body>${bodyText}</Body>
-                            <Media>${invoiceUrl}</Media>
-                        </Message>
-                    </Response>`);
+                log(`[TWILIO] Sending /generate success reply for ID ${orderId} with Media: ${invoiceUrl}`);
+                return sendTwiML(res, bodyText, invoiceUrl);
             });
             return;
         }
@@ -730,15 +731,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
             
             responseText += `\n\n👉 *Chat with Customer:*\n${waLink}\n\n📄 *Invoice URL:* ${invoiceUrl}`;
 
-            res.set('Content-Type', 'text/xml');
-            res.send(`<?xml version="1.0" encoding="UTF-8"?>
-                <Response>
-                    <Message>
-                        <Body>${responseText}</Body>
-                        ${commandType === 'Repair' ? `<Media>${invoiceUrl}</Media>` : ''}
-                    </Message>
-                </Response>
-            `);
+            return sendTwiML(res, responseText, commandType === 'Repair' ? invoiceUrl : null);
         });
     } catch (e) {
         logError('[TWILIO] Error:', e);
