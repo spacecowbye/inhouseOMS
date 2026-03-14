@@ -459,28 +459,6 @@ app.put('/api/orders/:id', (req, res) => {
             
             console.log(`[INFO] Successfully updated order ID: ${id}. Changes: ${this.changes}`);
 
-            // AUTOMATIC DELIVERY INVOICE logic
-            const wasDelivered = currentOrder.collectedByCustomerDate != null;
-            const isDelivered = orderData.collectedByCustomerDate != null;
-            const isRepair = (orderData.type || currentOrder.type) === 'Repair';
-
-            if (!wasDelivered && isDelivered && isRepair) {
-                const customerMobile = orderData.mobile || currentOrder.mobile;
-                const customerName = orderData.firstName || currentOrder.firstName;
-
-                if (customerMobile) {
-                    let cleanMobile = customerMobile.replace(/\D/g, '');
-                    if (cleanMobile.startsWith('0')) cleanMobile = cleanMobile.slice(1);
-                    if (cleanMobile.length === 10) cleanMobile = '91' + cleanMobile;
-
-                    const invoiceUrl = `http://deepasoms.duckdns.org/api/orders/${id}/invoice`;
-                    const message = `Hi ${customerName}, your repair order #${id} has been delivered. Please find your PAID & DELIVERED invoice below. Thank you for choosing Deepa's!`;
-                    
-                    log(`[AUTO-DELIVERY] Sending invoice to ${cleanMobile} for order ${id}`);
-                    sendWhatsApp(`whatsapp:+${cleanMobile}`, message, invoiceUrl);
-                }
-            }
-
             res.status(200).json({ status: "success", message: "Order updated successfully", changes: this.changes });
         });
     });

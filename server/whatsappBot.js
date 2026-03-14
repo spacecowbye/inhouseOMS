@@ -194,41 +194,45 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
         const lowerText = text.toLowerCase();
         
         // --- HELP HANDLERS ---
+        const fullHelp = `🤖 *Deepa's Jewelry Bot - All Commands*\n\n` +
+                         `🛠 *REPAIR:* \`/repair Name, Mobile, Address, Total, Advance, Karigar, Notes\`\n` +
+                         `🚚 *DELIVERY:* \`/delivery Name, Mobile, Address, Total, Advance, AWB, Notes\`\n` +
+                         `📝 *ORDER:* \`/order Name, Mobile, Address, Total, Advance, Notes\`\n` +
+                         `📹 *APPT (Today):* \`/a Name, Mobile, Time, Notes, Date\` (Time: 14:30, Date: 15-03)\n` +
+                         `📹 *APPT (Tomorrow):* \`/at Name, Mobile, Time, Notes\`\n` +
+                         `📅 *SLOTS:* \`/slots\` or \`/slots tomorrow\`\n` +
+                         `🗑 *CLEAR SLOT:* \`/reschedule Time\` or \`/reschedule Time tomorrow\`\n` +
+                         `📄 *INVOICE:* \`/generate ID\` (Normal PDF)\n` +
+                         `✅ *COLLECTED:* \`/rc ID\` (Mark Collected + Stamped Invoice)\n\n` +
+                         `⚠️ *IMPORTANT:* Separate details with a COMMA ( , ) for /repair, /delivery, /order, and /a.`;
+
+        // --- HELP HANDLERS ---
         if (lowerText.startsWith('/help')) {
-            let helpMsg = "";
             const sepInfo = "⚠️ *IMPORTANT:* Separate each detail with a COMMA ( , )";
 
             if (lowerText.includes('repair')) {
-                helpMsg = `🛠 *REPAIR Order Format*\n${sepInfo}\n\n` +
+                const repairHelp = `🛠 *REPAIR Order Format*\n${sepInfo}\n\n` +
                           `*Command:*\n/repair Name, Mobile, Address, Total, Advance, Karigar, Notes\n\n` +
-                          `*Example (with TBD):*\n/repair Deepa Ben, 9925042620, Ahmedabad, TBD, 0, Karigar, Ring\n\n` +
-                          `💡 Use *TBD* if the amount is not yet fixed.`;
+                          `*Example:*\n/repair Deepa Ben, 9925042620, Ahmedabad, 5000, 1000, Anil, Resize Ring`;
+                res.set('Content-Type', 'text/xml');
+                return res.send(`<Response><Message>${repairHelp}</Message></Response>`);
             } else if (lowerText.includes('delivery')) {
-                helpMsg = `🚚 *DELIVERY Order Format*\n${sepInfo}\n\n` +
-                          `*Command:*\n/delivery Name, Mobile, Address, Total, Advance, TrackingNumber, Notes\n\n` +
+                const deliveryHelp = `🚚 *DELIVERY Order Format*\n${sepInfo}\n\n` +
+                          `*Command:*\n/delivery Name, Mobile, Address, Total, Advance, AWB, Notes\n\n` +
                           `*Example:*\n/delivery Priya, 9876543210, 56 Park Ave, 20000, 20000, TRACK123, Ship urgent`;
-            } else if (lowerText.includes('appointment') || lowerText.startsWith('/a')) {
-                helpMsg = `📹 *VIDEO CALL Appointment*\n${sepInfo}\n\n` +
+                res.set('Content-Type', 'text/xml');
+                return res.send(`<Response><Message>${deliveryHelp}</Message></Response>`);
+            } else if (lowerText.includes('appointment')) {
+                const apptHelp = `📹 *VIDEO CALL Appointment*\n${sepInfo}\n\n` +
                           `*Command:*\n/a Name, Mobile, Time, Notes, Date\n\n` +
-                          `*Format Info:*\n` +
-                          `• *Time:* HH:MM (24-hour, e.g., 14:30)\n` +
-                          `• *Date:* DD-MM (Optional, defaults to Today)\n\n` +
-                          `*Example:*\n/a Rahul, 9876543210, 11:30, Show Rings, 18-01\n\n` +
-                          `💡 *Shortcuts:*\n` +
-                          `• */at* ... Name, Mobile, Time, Notes (Today/Tomorrow defaults)`;
+                          `*Format:* Date (DD-MM) is optional. Time is HH:MM (24-hour).\n\n` +
+                          `*Example:*\n/a Rahul, 9876543210, 11:30, Show Rings, 18-01`;
+                res.set('Content-Type', 'text/xml');
+                return res.send(`<Response><Message>${apptHelp}</Message></Response>`);
             } else {
-                // General Help
-                helpMsg = `👋 *Jewelry Bot Help*\n\n` +
-                          `👉 */a* (Appointment Today)\n` +
-                          `👉 */at* (Appointment Tomorrow)\n` +
-                          `👉 */slots* (Check Today)\n` +
-                          `👉 */slots tomorrow* (Check Tomorrow)\n` +
-                          `👉 */reschedule* (Clear a slot)\n` +
-                          `👉 */help order/repair/delivery* for more.`;
+                res.set('Content-Type', 'text/xml');
+                return res.send(`<Response><Message>${fullHelp}</Message></Response>`);
             }
-
-            res.set('Content-Type', 'text/xml');
-            return res.send(`<Response><Message>${helpMsg}</Message></Response>`);
         }
 
         // --- SLOTS AVAILABILITY COMMAND ---
@@ -339,6 +343,70 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
             return;
         }
 
+        // --- REPAIR COLLECTED COMMAND ---
+        if (lowerText.startsWith('/rc')) {
+            const parts = text.split(/\s+/);
+            const orderId = parts[1];
+
+            if (!orderId) {
+                res.set('Content-Type', 'text/xml');
+                return res.send(`<Response><Message>❌ Please provide an Order ID.\nExample: */rc 123*</Message></Response>`);
+            }
+
+            const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+
+            // 1. Update the order status to Delivered
+            db.run("UPDATE orders SET collectedByCustomerDate = ? WHERE id = ? AND type = 'Repair'", [today, orderId], function(err) {
+                if (err) {
+                    logError('[TWILIO] DB Error:', err);
+                    res.set('Content-Type', 'text/xml');
+                    return res.send('<Response><Message>❌ Database Error</Message></Response>');
+                }
+
+                if (this.changes === 0) {
+                    res.set('Content-Type', 'text/xml');
+                    return res.send(`<Response><Message>❌ Repair Order #${orderId} not found or not a Repair.</Message></Response>`);
+                }
+
+                // 2. Fetch order details to generate response
+                db.get("SELECT firstName, lastName, mobile FROM orders WHERE id = ?", [orderId], (err, row) => {
+                    if (err || !row) {
+                        res.set('Content-Type', 'text/xml');
+                        return res.send(`<Response><Message>✅ Order #${orderId} marked as Collected, but failed to fetch details.</Message></Response>`);
+                    }
+
+                    const invoiceUrl = `http://deepasoms.duckdns.org/api/orders/${orderId}/invoice`;
+                    
+                    let waLink = "No mobile number";
+                    if (row.mobile) {
+                        let cleanMobile = row.mobile.replace(/\D/g, '');
+                        if (cleanMobile.startsWith('0')) cleanMobile = cleanMobile.slice(1);
+                        if (cleanMobile.length === 10) cleanMobile = '91' + cleanMobile;
+
+                        const customerMsg = `Hi ${row.firstName}, your repair is ready and collected! Here is your PAID & DELIVERED invoice: ${invoiceUrl}`;
+                        waLink = `https://wa.me/${cleanMobile}?text=${encodeURIComponent(customerMsg)}`;
+                    }
+
+                    const bodyText = `📦 *Repair Collected & Paid*\n\n` +
+                                     `👤 ${row.firstName} ${row.lastName}\n` +
+                                     `✅ Status: Delivered (Today)\n\n` +
+                                     `👉 *Chat with Customer:*\n${waLink}\n\n` +
+                                     `🔗 *Invoice PDF (Stamped):*\n${invoiceUrl}`;
+
+                    res.set('Content-Type', 'text/xml');
+                    res.send(`
+                        <Response>
+                            <Message>
+                                <Body>${bodyText}</Body>
+                                <Media>${invoiceUrl}</Media>
+                            </Message>
+                        </Response>
+                    `);
+                });
+            });
+            return;
+        }
+
         // --- GENERATE INVOICE COMMAND ---
         if (lowerText.startsWith('/generate')) {
             const parts = text.split(/\s+/);
@@ -349,27 +417,19 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                 return res.send(`<Response><Message>❌ Please provide an Order ID.\nExample: */generate 123*</Message></Response>`);
             }
 
-            // Check if order exists
             db.get("SELECT id, firstName, lastName, mobile FROM orders WHERE id = ?", [orderId], (err, row) => {
-                if (err) {
-                    logError('[TWILIO] DB Error:', err);
-                    res.set('Content-Type', 'text/xml');
-                    return res.send('<Response><Message>❌ Database Error</Message></Response>');
-                }
-                if (!row) {
+                if (err || !row) {
                     res.set('Content-Type', 'text/xml');
                     return res.send(`<Response><Message>❌ Order #${orderId} not found.</Message></Response>`);
                 }
 
                 const invoiceUrl = `http://deepasoms.duckdns.org/api/orders/${orderId}/invoice`;
                 
-                // Construct Click-to-Chat Link
                 let waLink = "No mobile number";
                 if (row.mobile) {
                     let cleanMobile = row.mobile.replace(/\D/g, '');
                     if (cleanMobile.startsWith('0')) cleanMobile = cleanMobile.slice(1);
                     if (cleanMobile.length === 10) cleanMobile = '91' + cleanMobile;
-
                     const customerMsg = `Hi ${row.firstName}, here is your invoice: ${invoiceUrl}`;
                     waLink = `https://wa.me/${cleanMobile}?text=${encodeURIComponent(customerMsg)}`;
                 }
@@ -389,7 +449,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                     </Response>
                 `);
             });
-            return; // Stop further processing
+            return;
         }
 
         // --- COMMAND PARSING ---
@@ -404,9 +464,9 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
         else if (lowerText.startsWith('/a ') || lowerText === '/a' || lowerText.startsWith('/appointment') || lowerText.startsWith('/vc')) commandType = 'Appointment';
 
         if (!commandType) {
-            // Unknown command
+            // Unknown command - show full help
             res.set('Content-Type', 'text/xml');
-            return res.send(`<Response><Message>👋 Send */help order*, */help repair*, or */help delivery* for instructions.</Message></Response>`);
+            return res.send(`<Response><Message>${fullHelp}</Message></Response>`);
         }
 
         // Remove command keyword (e.g. "/order") and split
