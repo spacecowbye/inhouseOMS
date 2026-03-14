@@ -134,15 +134,34 @@ export async function generateInvoiceBuffer(order) {
             // Stamp
             if (order.collectedByCustomerDate) {
                 doc.save();
+                
+                // Format the collection date: YYYY-MM-DD -> DD Month YYYY
+                const [y, m, d] = order.collectedByCustomerDate.split('-');
+                const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+                const dateClean = `${parseInt(d)} ${months[parseInt(m)-1]} ${y}`;
+
                 const stampText = 'PAID AND DELIVERED';
-                doc.fontSize(50).font('Helvetica-Bold');
-                const textWidth = doc.widthOfString(stampText);
-                const textHeight = doc.currentLineHeight();
+                doc.fontSize(45).font('Helvetica-Bold');
+                const textWidth = Math.max(doc.widthOfString(stampText), doc.widthOfString(dateClean));
                 
                 doc.translate(297, 420);
                 doc.rotate(-25);
-                doc.rect(-textWidth/2 - 10, -textHeight/2 - 10, textWidth + 20, textHeight + 20).lineWidth(4).strokeColor('red').strokeOpacity(0.3).stroke();
-                doc.fillColor('red').fillOpacity(0.3).text(stampText, -textWidth / 2, -textHeight / 2);
+                
+                // Draw a rectangle border for the stamp
+                // We assume room for two lines of text (stampText + dateClean)
+                const boxWidth = textWidth + 30;
+                const boxHeight = 100;
+
+                doc.rect(-boxWidth/2, -boxHeight/2, boxWidth, boxHeight)
+                   .lineWidth(4)
+                   .strokeColor('red')
+                   .strokeOpacity(0.3)
+                   .stroke();
+
+                doc.fillColor('red').fillOpacity(0.3);
+                doc.text(stampText, -boxWidth/2, -boxHeight/2 + 15, { width: boxWidth, align: 'center' });
+                doc.fontSize(30).text(dateClean, -boxWidth/2, -boxHeight/2 + 60, { width: boxWidth, align: 'center' });
+                
                 doc.restore();
             }
 
