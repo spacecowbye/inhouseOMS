@@ -375,7 +375,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                         return res.send(`<Response><Message>✅ Order #${orderId} marked as Collected, but failed to fetch details.</Message></Response>`);
                     }
 
-                    const invoiceUrl = `http://deepasoms.duckdns.org/api/orders/${orderId}/invoice`;
+                    const invoiceUrl = `http://deepasoms.duckdns.org/api/orders/${orderId}/invoice?t=${Date.now()}`;
                     
                     let waLink = "No mobile number";
                     if (row.mobile) {
@@ -423,7 +423,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                     return res.send(`<Response><Message>❌ Order #${orderId} not found.</Message></Response>`);
                 }
 
-                const invoiceUrl = `http://deepasoms.duckdns.org/api/orders/${orderId}/invoice`;
+                const invoiceUrl = `http://deepasoms.duckdns.org/api/orders/${orderId}/invoice?t=${Date.now()}`;
                 
                 let waLink = "No mobile number";
                 if (row.mobile) {
@@ -672,7 +672,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                 return res.status(500).send('<Response><Message>❌ Database Error</Message></Response>');
             }
 
-            const invoiceUrl = `http://deepasoms.duckdns.org/api/orders/${this.lastID}/invoice`;
+            const invoiceUrl = `http://deepasoms.duckdns.org/api/orders/${this.lastID}/invoice?t=${Date.now()}`;
 
             // Success Response
             const formatDisp = (val) => (val === -1) ? 'TBD' : (val || 0).toLocaleString();

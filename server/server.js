@@ -700,22 +700,32 @@ app.get('/api/orders/:id/invoice', async (req, res) => {
 
             // --- STAMP (If Delivered) ---
             if (order.collectedByCustomerDate) {
+                console.log(`[STAMP] Adding PAID & DELIVERED stamp to Order #${order.id}`);
                 doc.save();
-                doc.fontSize(60);
-                doc.fillColor('red');
-                doc.fillOpacity(0.2);
                 
                 // Position in center
                 const stampText = 'PAID AND DELIVERED';
+                doc.fontSize(50).font('Helvetica-Bold');
                 const textWidth = doc.widthOfString(stampText);
                 const textHeight = doc.currentLineHeight();
                 
-                // Center of A4 is approx 297, 420
                 doc.translate(297, 420);
-                doc.rotate(-30);
+                doc.rotate(-25);
+                
+                // Draw a rectangle border for the stamp
+                doc.rect(-textWidth/2 - 10, -textHeight/2 - 10, textWidth + 20, textHeight + 20)
+                   .lineWidth(4)
+                   .strokeColor('red')
+                   .strokeOpacity(0.3)
+                   .stroke();
+
+                doc.fillColor('red');
+                doc.fillOpacity(0.3);
                 doc.text(stampText, -textWidth / 2, -textHeight / 2);
                 
                 doc.restore();
+            } else {
+                console.log(`[STAMP] Order #${order.id} is not marked as collected. Skip stamp.`);
             }
 
             doc.end();
