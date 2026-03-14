@@ -679,6 +679,15 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
             // Success Response
             const formatDisp = (val) => (val === -1) ? 'TBD' : (val || 0).toLocaleString();
 
+            let waLink = "No mobile number";
+            if (mobile) {
+                let cleanMobile = mobile.replace(/\D/g, '');
+                if (cleanMobile.startsWith('0')) cleanMobile = cleanMobile.slice(1);
+                if (cleanMobile.length === 10) cleanMobile = '91' + cleanMobile;
+                const customerMsg = `Hi ${firstName}, here is your invoice: ${invoiceUrl}`;
+                waLink = `https://wa.me/${cleanMobile}?text=${encodeURIComponent(customerMsg)}`;
+            }
+
             let responseText = `✅ *${commandType} Created!* (ID: ${this.lastID})\n` +
                 `👤 ${firstName} ${lastName}\n` +
                 `📱 ${mobile}\n` +
@@ -688,7 +697,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
             if (commandType === 'Delivery' && trackingNumber) responseText += `\n📦 AWB: ${trackingNumber}`;
             if (photoUrl) responseText += `\n🖼 Photo Attached`;
             
-            responseText += `\n\n📄 *Invoice:* ${invoiceUrl}`;
+            responseText += `\n\n👉 *Chat with Customer:*\n${waLink}\n\n📄 *Invoice URL:* ${invoiceUrl}`;
 
             res.set('Content-Type', 'text/xml');
             res.send(`
