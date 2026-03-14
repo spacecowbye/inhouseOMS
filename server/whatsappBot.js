@@ -354,35 +354,36 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
             }
 
             const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+            log(`[TWILIO] Processing /rc ${orderId} on ${today}`);
 
             // 1. Update the order status to Delivered
             db.run("UPDATE orders SET collectedByCustomerDate = ? WHERE id = ?", [today, orderId], function(err) {
                 if (err) {
-                    logError('[TWILIO] DB Error:', err);
+                    logError('[TWILIO] DB Update Error:', err);
                     res.set('Content-Type', 'text/xml');
-                    return res.send('<Response><Message>❌ Database Error</Message></Response>');
+                    return res.send('<Response><Message>❌ Database Update Error</Message></Response>');
                 }
 
                 if (this.changes === 0) {
+                    logError(`[TWILIO] /rc ${orderId} failed: No rows changed.`);
                     res.set('Content-Type', 'text/xml');
                     return res.send(`<Response><Message>❌ Order #${orderId} not found.</Message></Response>`);
                 }
 
+                log(`[TWILIO] /rc ${orderId} success: Fetching details...`);
                 // 2. Fetch order details to generate response
                 db.get("SELECT firstName, lastName, mobile FROM orders WHERE id = ?", [orderId], (err, row) => {
                     if (err || !row) {
+                        logError('[TWILIO] DB Fetch Error after /rc:', err);
                         res.set('Content-Type', 'text/xml');
-                        return res.send(`<Response><Message>✅ Order #${orderId} marked as Collected, but failed to fetch details.</Message></Response>`);
+                        return res.send(`<Response><Message>✅ Order #${orderId} marked as Collected, but failed to fetch details for confirmation.</Message></Response>`);
                     }
 
                     const invoiceUrl = `http://deepasoms.duckdns.org/api/orders/${orderId}/invoice?t=${Date.now()}`;
                     
                     let waLink = "No mobile number";
                     if (row.mobile) {
-                        let cleanMobile = row.mobile.replace(/\D/g, '');
-                        if (cleanMobile.startsWith('0')) cleanMobile = cleanMobile.slice(1);
-                        if (cleanMobile.length === 10) cleanMobile = '91' + cleanMobile;
-
+                        const cleanMobile = normalizeMobile(row.mobile);
                         const customerMsg = `Hi ${row.firstName}, your repair is ready and collected! Here is your PAID & DELIVERED invoice: ${invoiceUrl}`;
                         waLink = `https://wa.me/${cleanMobile}?text=${encodeURIComponent(customerMsg)}`;
                     }
@@ -393,6 +394,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                                      `👉 *Chat with Customer:*\n${waLink}\n\n` +
                                      `🔗 *Invoice PDF (Stamped):*\n${invoiceUrl}`;
 
+                    log(`[TWILIO] Sending /rc success reply for ID ${orderId}`);
                     res.set('Content-Type', 'text/xml');
                     res.send(`
                         <Response>

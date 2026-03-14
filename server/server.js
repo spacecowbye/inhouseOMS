@@ -498,9 +498,19 @@ import PDFDocument from 'pdfkit';
 app.get('/api/orders/:id/invoice', async (req, res) => {
     const id = req.params.id;
     
+    // Disable caching for invoices to ensure status updates are reflected immediately
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('Surrogate-Control', 'no-store');
+
     db.get("SELECT * FROM orders WHERE id = ?", [id], async (err, order) => {
-        if (err) return handleServerError(res, err, "Database error");
-        if (!order) return res.status(404).send("Order not found");
+        if (err || !order) {
+            console.error("[PDF] Order not found:", id);
+            return res.status(404).send("Order not found");
+        }
+        
+        console.log(`[PDF] Generating invoice for Order #${id}. Collected Date: ${order.collectedByCustomerDate || 'NONE'}`);
 
         try {
             const doc = new PDFDocument({ margin: 50, size: 'A4' });
