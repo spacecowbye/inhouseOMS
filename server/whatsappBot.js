@@ -1,5 +1,6 @@
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import twilio from 'twilio';
+import { generateInvoiceBuffer } from './invoiceGenerator.js';
 
 const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 const TWILIO_FROM = process.env.TWILIO_FROM_NUMBER || 'whatsapp:+14155238886';
@@ -181,6 +182,31 @@ async function downloadMedia(url) {
     if (!contentType) log('[TWILIO] Warning: No content-type header from media URL');
     
     return { buffer, contentType: contentType || 'image/jpeg' };
+}
+
+async function createAndUploadInvoice(order, s3, bucket, region) {
+    try {
+        const buffer = await generateInvoiceBuffer(order);
+        const ts = Date.now();
+        const state = order.collectedByCustomerDate ? 'DELIVERED' : 'DRAFT';
+        const filename = `invoices/inv_${order.id}_${state}_${ts}.pdf`;
+        
+        await s3.send(new PutObjectCommand({
+            Bucket: bucket,
+            Key: filename,
+            Body: buffer,
+            ACL: "public-read",
+            ContentType: "application/pdf",
+            // Force download and prevent caching
+            CacheControl: "no-cache, no-store, must-revalidate",
+            ContentDisposition: `inline; filename="invoice_${order.id}.pdf"`
+        }));
+        
+        return `https://${bucket}.s3.${region}.amazonaws.com/${filename}`;
+    } catch (err) {
+        logError('[PDF-S3] Failed to generate/upload:', err);
+        return null;
+    }
 }
 
 export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
@@ -370,16 +396,18 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                     return res.send(`<Response><Message>❌ Order #${orderId} not found.</Message></Response>`);
                 }
 
-                log(`[TWILIO] /rc ${orderId} success: Fetching details...`);
+                log(`[TWILIO] /rc ${orderId} success: Fetching details and generating S3 PDF...`);
                 // 2. Fetch order details to generate response
-                db.get("SELECT firstName, lastName, mobile FROM orders WHERE id = ?", [orderId], (err, row) => {
+                db.get("SELECT * FROM orders WHERE id = ?", [orderId], async (err, row) => {
                     if (err || !row) {
                         logError('[TWILIO] DB Fetch Error after /rc:', err);
                         res.set('Content-Type', 'text/xml');
                         return res.send(`<Response><Message>✅ Order #${orderId} marked as Collected, but failed to fetch details for confirmation.</Message></Response>`);
                     }
 
-                    const invoiceUrl = `http://deepasoms.duckdns.org/api/orders/${orderId}/invoice?t=${Date.now()}`;
+                    // GENERATE AND UPLOAD S3 PDF
+                    const s3Url = await createAndUploadInvoice(row, s3, bucket, region);
+                    const invoiceUrl = s3Url || `http://deepasoms.duckdns.org/api/orders/${orderId}/invoice?t=${Date.now()}`;
                     
                     let waLink = "No mobile number";
                     if (row.mobile) {
@@ -392,18 +420,17 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                                      `👤 ${row.firstName} ${row.lastName}\n` +
                                      `✅ Status: Delivered (Today)\n\n` +
                                      `👉 *Chat with Customer:*\n${waLink}\n\n` +
-                                     `🔗 *Invoice PDF (Stamped):*\n${invoiceUrl}`;
+                                     `🔗 *Invoice PDF (S3 Stamped):*\n${invoiceUrl}`;
 
-                    log(`[TWILIO] Sending /rc success reply for ID ${orderId}`);
+                    log(`[TWILIO] Sending /rc success reply for ID ${orderId} with Media: ${invoiceUrl}`);
                     res.set('Content-Type', 'text/xml');
-                    res.send(`
+                    return res.send(`<?xml version="1.0" encoding="UTF-8"?>
                         <Response>
                             <Message>
                                 <Body>${bodyText}</Body>
                                 <Media>${invoiceUrl}</Media>
                             </Message>
-                        </Response>
-                    `);
+                        </Response>`);
                 });
             });
             return;
@@ -419,19 +446,18 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                 return res.send(`<Response><Message>❌ Please provide an Order ID.\nExample: */generate 123*</Message></Response>`);
             }
 
-            db.get("SELECT id, firstName, lastName, mobile FROM orders WHERE id = ?", [orderId], (err, row) => {
+            db.get("SELECT * FROM orders WHERE id = ?", [orderId], async (err, row) => {
                 if (err || !row) {
                     res.set('Content-Type', 'text/xml');
                     return res.send(`<Response><Message>❌ Order #${orderId} not found.</Message></Response>`);
                 }
 
-                const invoiceUrl = `http://deepasoms.duckdns.org/api/orders/${orderId}/invoice?t=${Date.now()}`;
+                const s3Url = await createAndUploadInvoice(row, s3, bucket, region);
+                const invoiceUrl = s3Url || `http://deepasoms.duckdns.org/api/orders/${orderId}/invoice?t=${Date.now()}`;
                 
                 let waLink = "No mobile number";
                 if (row.mobile) {
-                    let cleanMobile = row.mobile.replace(/\D/g, '');
-                    if (cleanMobile.startsWith('0')) cleanMobile = cleanMobile.slice(1);
-                    if (cleanMobile.length === 10) cleanMobile = '91' + cleanMobile;
+                    const cleanMobile = normalizeMobile(row.mobile);
                     const customerMsg = `Hi ${row.firstName}, here is your invoice: ${invoiceUrl}`;
                     waLink = `https://wa.me/${cleanMobile}?text=${encodeURIComponent(customerMsg)}`;
                 }
@@ -439,17 +465,16 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                 const bodyText = `📄 *Invoice Generated*\n\n` +
                                  `👤 ${row.firstName} ${row.lastName}\n\n` +
                                  `👉 *Chat with Customer:*\n${waLink}\n\n` +
-                                 `🔗 *Download PDF:*\n${invoiceUrl}`;
+                                 `🔗 *Download PDF (S3):*\n${invoiceUrl}`;
 
                 res.set('Content-Type', 'text/xml');
-                res.send(`
+                return res.send(`<?xml version="1.0" encoding="UTF-8"?>
                     <Response>
                         <Message>
                             <Body>${bodyText}</Body>
                             <Media>${invoiceUrl}</Media>
                         </Message>
-                    </Response>
-                `);
+                    </Response>`);
             });
             return;
         }
@@ -668,22 +693,28 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
             commandType === 'Delivery' ? today : null
         ];
 
-        db.run(sql, values, function (err) {
+        db.run(sql, values, async function (err) {
             if (err) {
                 logError('[TWILIO] DB Error:', err);
                 return res.status(500).send('<Response><Message>❌ Database Error</Message></Response>');
             }
 
-            const invoiceUrl = `http://deepasoms.duckdns.org/api/orders/${this.lastID}/invoice?t=${Date.now()}`;
+            // Create Order Object for PDF
+            const order = {
+                id: this.lastID, firstName, lastName, mobile, address, 
+                totalAmount, advancePaid, remainingAmount,
+                type: commandType, karigarName, notes, photoUrl
+            };
+
+            const s3Url = await createAndUploadInvoice(order, s3, bucket, region);
+            const invoiceUrl = s3Url || `http://deepasoms.duckdns.org/api/orders/${this.lastID}/invoice?t=${Date.now()}`;
 
             // Success Response
             const formatDisp = (val) => (val === -1) ? 'TBD' : (val || 0).toLocaleString();
 
             let waLink = "No mobile number";
             if (mobile) {
-                let cleanMobile = mobile.replace(/\D/g, '');
-                if (cleanMobile.startsWith('0')) cleanMobile = cleanMobile.slice(1);
-                if (cleanMobile.length === 10) cleanMobile = '91' + cleanMobile;
+                const cleanMobile = normalizeMobile(mobile);
                 const customerMsg = `Hi ${firstName}, here is your invoice: ${invoiceUrl}`;
                 waLink = `https://wa.me/${cleanMobile}?text=${encodeURIComponent(customerMsg)}`;
             }
@@ -700,7 +731,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
             responseText += `\n\n👉 *Chat with Customer:*\n${waLink}\n\n📄 *Invoice URL:* ${invoiceUrl}`;
 
             res.set('Content-Type', 'text/xml');
-            res.send(`
+            res.send(`<?xml version="1.0" encoding="UTF-8"?>
                 <Response>
                     <Message>
                         <Body>${responseText}</Body>
