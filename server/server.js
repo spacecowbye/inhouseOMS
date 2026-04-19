@@ -273,20 +273,164 @@ app.post('/api/orders/upload-photo', upload.single('photo'), async (req, res) =>
 
 
 // --- TRACKING PROXY ---
+const trackUPS = (awb) => {
+    // UPS tracking numbers starting with 1Z are standard.
+    // UPS has heavy bot protection, so we provide a premium tracking card with direct links.
+    log(`[INFO] Generating UPS Tracking Card for AWB: ${awb}`);
+    
+    return `
+        <div class="ups-tracking p-6 bg-white rounded-xl shadow-lg border-l-8 border-yellow-600">
+            <div class="flex items-center justify-between mb-4 pb-4 border-b">
+                <div class="flex items-center gap-3">
+                    <div class="bg-yellow-600 p-2 rounded-lg">
+                        <svg viewBox="0 0 24 24" class="w-6 h-6 fill-white" xmlns="http://www.w3.org/2000/svg"><path d="M12 2L4.5 5.5v10.5L12 22l7.5-6V5.5L12 2zm0 17.5L6.5 15.5V7.5L12 5l5.5 2.5v8l-5.5 4z"/></svg>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-xl text-gray-800">UPS International</h3>
+                        <p class="text-sm text-gray-500">Official UPS Tracking</p>
+                    </div>
+                </div>
+                <span class="px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-bold uppercase tracking-wider">detected</span>
+            </div>
+
+            <div class="bg-gray-50 p-4 rounded-lg mb-6 flex flex-col items-center">
+                <span class="text-xs text-gray-400 uppercase font-bold mb-1">Tracking Number</span>
+                <span class="text-2xl font-mono text-gray-800 font-bold">${awb}</span>
+            </div>
+
+            <div class="space-y-4">
+                <a href="https://www.ups.com/track?loc=en_IN&tracknum=${awb}" target="_blank" 
+                   class="flex items-center justify-center w-full bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-3 px-4 rounded-lg transition-all shadow-md group">
+                    View Live Status on UPS.com
+                    <svg class="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
+                </a>
+                
+                <div class="grid grid-cols-2 gap-3">
+                    <a href="https://www.aftership.com/track/ups/${awb}" target="_blank" class="text-center text-xs text-yellow-700 bg-yellow-50 py-2 rounded border border-yellow-100 hover:bg-yellow-100">Alternative Tracker</a>
+                    <a href="https://parcelsapp.com/en/tracking/${awb}" target="_blank" class="text-center text-xs text-yellow-700 bg-yellow-50 py-2 rounded border border-yellow-100 hover:bg-yellow-100">Global Tracker</a>
+                </div>
+            </div>
+
+            <div class="mt-6 pt-4 border-t text-[11px] text-gray-400 text-center italic">
+                UPS tracking details are fetched directly from official portals for maximum accuracy.
+            </div>
+
+            <style>
+                .ups-tracking { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+                @keyframes pulse-yellow {
+                    0% { box-shadow: 0 0 0 0 rgba(202, 138, 4, 0.4); }
+                    70% { box-shadow: 0 0 0 10px rgba(202, 138, 4, 0); }
+                    100% { box-shadow: 0 0 0 0 rgba(202, 138, 4, 0); }
+                }
+            </style>
+        </div>
+    `;
+};
+
+const trackMahavir = async (awb) => {
+    try {
+        log(`[INFO] Attempting Mahavir Tracking for AWB: ${awb}`);
+        const baseUrl = 'https://shreemahavircourier.com/';
+        
+        // 1. Get ASP.NET tokens from homepage
+        const homeRes = await fetch(baseUrl);
+        const homeHtml = await homeRes.text();
+        const cookie = homeRes.headers.get('set-cookie');
+
+        const vs = homeHtml.match(/name="__VIEWSTATE" id="__VIEWSTATE" value="(.*?)"/)?.[1];
+        const vsg = homeHtml.match(/name="__VIEWSTATEGENERATOR" id="__VIEWSTATEGENERATOR" value="(.*?)"/)?.[1];
+        const ev = homeHtml.match(/name="__EVENTVALIDATION" id="__EVENTVALIDATION" value="(.*?)"/)?.[1];
+
+        if (!vs || !ev) {
+            logError("[MAHAVIR] Failed to extract ASP.NET tokens");
+            return null;
+        }
+
+        // 2. POST to get the tracking result (follow redirect)
+        const params = new URLSearchParams();
+        params.append('__VIEWSTATE', vs);
+        params.append('__VIEWSTATEGENERATOR', vsg || '');
+        params.append('__EVENTVALIDATION', ev);
+        params.append('txtAWBNo', awb);
+        params.append('cmdTrack', 'Tracking');
+
+        const trackRes = await fetch(baseUrl, {
+            method: 'POST',
+            body: params,
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Cookie': cookie ? cookie.split(';')[0] : '',
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            },
+            redirect: 'follow'
+        });
+
+        const html = await trackRes.text();
+
+        // 3. Extract tables using regex
+        const transitTable = html.match(/<table[^>]*id="ctl00_MainContent_tblTrack"[^>]*>[\s\S]*?<\/table>/i)?.[0];
+        const deliveryTable = html.match(/<table[^>]*id="ctl00_MainContent_tblDelivery"[^>]*>[\s\S]*?<\/table>/i)?.[0];
+        const statusMatch = html.match(/<span id="ctl00_MainContent_lblStatus"[^>]*>([\s\S]*?)<\/span>/i)?.[1];
+        const infoMatch = html.match(/<div class="prod-info white-clr">([\s\S]*?)<\/div>/i)?.[0];
+
+        if (!transitTable && !deliveryTable && !statusMatch) return null;
+
+        let resultHtml = `
+            <div class="mahavir-tracking p-4 bg-white rounded shadow-sm">
+                <div class="flex items-center justify-between mb-4 border-b pb-2">
+                    <h3 class="font-bold text-lg text-red-600">Shree Mahavir Courier</h3>
+                    <div class="text-sm font-semibold">${statusMatch || 'Status Unknown'}</div>
+                </div>
+                ${infoMatch ? `<div class="mb-4 text-sm text-gray-700 mahavir-info">${infoMatch}</div>` : ''}
+                
+                <h4 class="font-bold text-md mt-4 mb-2">Transit Details</h4>
+                <div class="overflow-x-auto mb-6">
+                    ${transitTable || 'No transit records.'}
+                </div>
+
+                <h4 class="font-bold text-md mt-4 mb-2">Delivery Details</h4>
+                <div class="overflow-x-auto">
+                    ${deliveryTable || 'Not delivered yet.'}
+                </div>
+
+                <style>
+                    .mahavir-tracking table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+                    .mahavir-tracking th { background: #f8f9fa; text-align: left; padding: 10px; border: 1px solid #dee2e6; }
+                    .mahavir-tracking td { padding: 10px; border: 1px solid #dee2e6; }
+                    .mahavir-tracking .prod-info ul { list-style: none; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+                    .mahavir-tracking .prod-info li { border-bottom: 1px solid #f0f0f0; padding: 4px 0; }
+                    .mahavir-tracking .title-2 { font-weight: bold; color: #666; margin-right: 5px; }
+                    .mahavir-tracking .theme-clr { color: #d32f2f; }
+                </style>
+            </div>
+        `;
+
+        return resultHtml;
+    } catch (e) {
+        logError("[MAHAVIR ERROR]", e);
+        return null;
+    }
+};
+
 app.post('/api/track-order', async (req, res) => {
     const { awb } = req.body;
     if (!awb) return res.status(400).json({ status: 'error', message: 'AWB required' });
 
     try {
         console.log(`[INFO] Tracking AWB: ${awb}`);
+
+        // 0. Detect UPS (AWB starts with 1Z)
+        if (awb.toUpperCase().startsWith('1Z')) {
+            const upsHtml = trackUPS(awb);
+            return res.send(upsHtml);
+        }
         
-        // Using headers/cookie from user's provided CURL command
-        const response = await fetch('https://www.trackon.in/courier-tracking', {
+        // 1. Try Trackon first
+        const trackonRes = await fetch('https://www.trackon.in/courier-tracking', {
             method: 'POST',
             headers: {
                 'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
                 'accept-language': 'en-US,en;q=0.9',
-                'cache-control': 'max-age=0',
                 'content-type': 'application/x-www-form-urlencoded',
                 'origin': 'https://www.trackon.in',
                 'referer': 'https://www.trackon.in/courier-tracking',
@@ -295,21 +439,15 @@ app.post('/api/track-order', async (req, res) => {
             body: `awbSingleTrackingId=${awb}&submit=Submit`
         });
 
-        const html = await response.text();
-        
-        // Extract strictly the table
-        const tableMatch = html.match(/<table[^>]*class="[^"]*table-hightlight[^"]*"[^>]*>[\s\S]*?<\/table>/i);
+        const trackonHtml = await trackonRes.text();
+        const tableMatch = trackonHtml.match(/<table[^>]*class="[^"]*table-hightlight[^"]*"[^>]*>[\s\S]*?<\/table>/i);
         
         if (tableMatch) {
             let cleanHtml = tableMatch[0];
-            // Fix relative image paths to point to trackon.in
             cleanHtml = cleanHtml.replace(/\/assets\/images\//g, 'https://www.trackon.in/assets/images/');
-            // Remove onClick handlers that might cause errors
             cleanHtml = cleanHtml.replace(/onclick="[^"]*"/g, '');
-            // Remove hrefs to modals
             cleanHtml = cleanHtml.replace(/href="#BModel"/g, 'href="#" style="pointer-events: none; text-decoration: none; color: inherit;"');
             
-            // Hide Transaction Number (2nd col) and Image (4th col)
             const hideCss = `
                 <style>
                     table.footable tr > *:nth-child(2), 
@@ -318,11 +456,19 @@ app.post('/api/track-order', async (req, res) => {
                     }
                 </style>
             `;
-            
-            res.send(hideCss + cleanHtml);
-        } else {
-            res.send('<div class="p-4 text-center text-gray-500">No tracking information found for this AWB.</div>');
+            return res.send(hideCss + cleanHtml);
         }
+
+        // 2. If Trackon fails, try Mahavir
+        log(`[INFO] Trackon result empty for ${awb}, trying Mahavir...`);
+        const mahavirHtml = await trackMahavir(awb);
+        
+        if (mahavirHtml) {
+            return res.send(mahavirHtml);
+        }
+
+        // 3. Fallback
+        res.send('<div class="p-4 text-center text-gray-500">No tracking information found for this AWB in Trackon or Mahavir.</div>');
 
     } catch (e) {
         console.error("[TRACKING ERROR]", e);
