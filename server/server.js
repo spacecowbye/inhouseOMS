@@ -17,6 +17,7 @@ const sqlite = sqlite3.verbose();
 const app = express();
 import { handleTwilioMessage, initReminders, sendWhatsApp } from "./whatsappBot.js" 
 import { generateInvoiceBuffer } from "./invoiceGenerator.js"
+import createInventoryRouter from "./src/routes/inventory.js"
 const PORT = 3001;
 
 // --- LOGGING HELPER ---
@@ -216,10 +217,38 @@ const db = new sqlite.Database(dbPath, (err) => {
                 }
             });
 
+            // Create polki_inventory table
+            db.run(`
+                CREATE TABLE IF NOT EXISTS polki_inventory (
+                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sku_id              TEXT UNIQUE NOT NULL,
+                    category            TEXT NOT NULL CHECK(category IN ('set', 'neckpiece', 'earrings')),
+                    can_sell_separately INTEGER DEFAULT 0,
+                    photo_url           TEXT NOT NULL,
+                    price               INTEGER NOT NULL,
+                    quantity            INTEGER NOT NULL CHECK(quantity >= 1),
+                    description         TEXT,
+                    tags                TEXT,
+                    source              TEXT DEFAULT 'manual' CHECK(source IN ('manual', 'whatsapp')),
+                    whatsapp_media_id   TEXT,
+                    deleted_at          TEXT DEFAULT NULL,
+                    created_at          TEXT DEFAULT (datetime('now')),
+                    updated_at          TEXT DEFAULT (datetime('now'))
+                )
+            `, (err) => {
+                if (err) console.error("[ERROR] Error creating polki_inventory table:", err.message);
+                else {
+                    console.log("[INFO] Polki inventory table ready.");
+                }
+            });
+
             console.log("[INFO] Orders table ready.");
         });
     }
 });
+
+// --- INVENTORY API ---
+app.use('/api/inventory', createInventoryRouter(db, s3, process.env.S3_BUCKET_NAME, process.env.AWS_REGION));
 
 // --- TWILIO WEBHOOK ---
 app.post('/api/whatsapp-webhook', (req, res) => {

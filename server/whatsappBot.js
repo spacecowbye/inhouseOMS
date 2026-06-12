@@ -1,6 +1,9 @@
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import twilio from 'twilio';
 import { generateInvoiceBuffer } from './invoiceGenerator.js';
+import sharp from 'sharp';
+import { extractPriceFromImage } from './src/utils/ocrUtils.js';
+import { generateSkuId } from './src/utils/skuUtils.js';
 
 const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 const TWILIO_FROM = process.env.TWILIO_FROM_NUMBER || 'whatsapp:+14155238886';
@@ -232,6 +235,90 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
         const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
         const text = Body.trim();
         const lowerText = text.toLowerCase();
+
+        // --- POLKI INVENTORY INGEST BRANCH ---
+        if (lowerText.includes('polki') && MediaUrl0) {
+            try {
+                // 1. Parse category
+                let category = 'neckpiece'; // default
+                if (lowerText.includes('set')) category = 'set';
+                else if (lowerText.includes('earring')) category = 'earrings';
+
+                // 2. Parse can_sell_separately
+                const canSellSeparately = (lowerText.includes('separate') || lowerText.includes('mix')) ? 1 : 0;
+
+                // 3. Parse quantity
+                const qtyMatch = lowerText.match(/qty\s*(\d+)/i) || lowerText.match(/quantity\s*(\d+)/i);
+                const quantity = qtyMatch ? parseInt(qtyMatch[1]) : 1;
+
+                // 4. Download media (reuse existing downloadMedia helper)
+                const { buffer, contentType } = await downloadMedia(MediaUrl0);
+
+                // 5. OCR price from raw buffer (before any Sharp processing)
+                let price = await extractPriceFromImage(buffer);
+
+                // 6. Fallback: parse price from message body text
+                if (!price) {
+                    const priceMatch = lowerText.match(/price\s*[₹]?\s*(\d+)/i)
+                        || lowerText.match(/[₹]\s*(\d+)/)
+                        || lowerText.match(/\b(\d{4,6})\b/);
+                    price = priceMatch ? parseInt(priceMatch[1]) : null;
+                }
+
+                // 7. If still no price — reply and bail
+                if (!price) {
+                    res.set('Content-Type', 'text/xml');
+                    return res.send(`<Response><Message>❌ Couldn't read a price from the photo or message.\nMake sure the price tag is visible, or add: price 45000</Message></Response>`);
+                }
+
+                // 8. Process image with Sharp → JPEG
+                const processedBuffer = await sharp(buffer).jpeg({ quality: 80 }).toBuffer();
+
+                // 9. Upload to S3
+                const filename = `polki/whatsapp_${Date.now()}.jpg`;
+                await s3.send(new PutObjectCommand({
+                    Bucket: bucket,
+                    Key: filename,
+                    Body: processedBuffer,
+                    ACL: 'public-read',
+                    ContentType: 'image/jpeg'
+                }));
+                const photoUrl = `https://${bucket}.s3.${region}.amazonaws.com/${filename}`;
+
+                // 10. Generate SKU ID
+                generateSkuId(db, (skuId) => {
+                    const sql = `
+                        INSERT INTO polki_inventory
+                            (sku_id, category, can_sell_separately, photo_url, price, quantity,
+                             description, source, whatsapp_media_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 'whatsapp', ?)
+                    `;
+                    const values = [
+                        skuId, category, canSellSeparately, photoUrl, price, quantity,
+                        text, // full original message body as description
+                        req.body.MediaSid0 || null
+                    ];
+
+                    db.run(sql, values, function(err) {
+                        if (err) {
+                            logError('[POLKI] DB insert error:', err);
+                            res.set('Content-Type', 'text/xml');
+                            return res.send(`<Response><Message>❌ Failed to save to inventory. Please try again.</Message></Response>`);
+                        }
+
+                        const msg = `✅ Polki stock added!\nSKU: ${skuId}\nType: ${category}\nPrice: ₹${price.toLocaleString('en-IN')}\nQty: ${quantity}`;
+                        res.set('Content-Type', 'text/xml');
+                        return res.send(`<Response><Message>${msg}</Message></Response>`);
+                    });
+                });
+
+            } catch (err) {
+                logError('[POLKI] Ingest error:', err);
+                res.set('Content-Type', 'text/xml');
+                return res.send(`<Response><Message>❌ Failed to add stock. Please try again.</Message></Response>`);
+            }
+            return;
+        }
         
         // --- HELP HANDLERS ---
         const fullHelp = `🤖 *Deepa's Jewelry Bot - All Commands*\n\n` +

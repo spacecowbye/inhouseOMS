@@ -7,7 +7,8 @@ import OrderForm from "./components/OrderForm";
 import DashboardTable from "./components/DashboardTable";
 import LoginScreen from "./components/LoginScreen";
 import CalendarView from "./components/CalendarView";
-import { LayoutList, Calendar as CalendarIcon } from "lucide-react";
+import { LayoutList, Calendar as CalendarIcon, Sparkles } from "lucide-react";
+import InventoryView from "./components/InventoryView";
 
 const API_BASE_URL = "/api/orders";
 const DEBOUNCE_DELAY_MS = 300;
@@ -399,10 +400,10 @@ const App = () => {
         <div className="mb-6 md:mb-8 flex justify-between items-center">
           <div>
             <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">
-              Jewelry Order Dashboard
+              {view === 'inventory' ? 'Polki Collection Inventory' : 'Jewelry Order Dashboard'}
             </h1>
             <p className="text-sm md:text-base text-gray-600">
-              Track and manage all jewelry orders
+              {view === 'inventory' ? 'Manage and track loose Polki jewelry stock' : 'Track and manage all jewelry orders'}
             </p>
           </div>
 
@@ -422,6 +423,13 @@ const App = () => {
               >
                 <CalendarIcon size={20} />
               </button>
+              <button
+                onClick={() => setView('inventory')}
+                className={`p-2 rounded-md transition-all ${view === 'inventory' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
+                title="Polki Inventory"
+              >
+                <Sparkles size={20} />
+              </button>
             </div>
 
             <button
@@ -440,33 +448,37 @@ const App = () => {
           </div>
         )}
 
-        <StatsCards stats={globalStats} isLoading={isLoading} />
+        {view !== 'inventory' && (
+          <>
+            <StatsCards stats={globalStats} isLoading={isLoading} />
 
-        <TableControls
-          searchTerm={searchTerm}
-          setSearchTerm={setSearchTerm}
-          statusFilter={statusFilter}
-          setStatusFilter={setStatusFilter}
-          typeFilter={typeFilter}
-          setTypeFilter={setTypeFilter}
-          sortBy={sortBy}
-          setSortBy={setSortBy}
-          handleNewOrderClick={handleNewOrderClick}
-          handleColumnSort={handleColumnSort}
-        />
+            <TableControls
+              searchTerm={searchTerm}
+              setSearchTerm={setSearchTerm}
+              statusFilter={statusFilter}
+              setStatusFilter={setStatusFilter}
+              typeFilter={typeFilter}
+              setTypeFilter={setTypeFilter}
+              sortBy={sortBy}
+              setSortBy={setSortBy}
+              handleNewOrderClick={handleNewOrderClick}
+              handleColumnSort={handleColumnSort}
+            />
 
-        {showForm && (
-          <OrderForm
-            formData={formData}
-            editingId={editingId}
-            handleInputChange={handleInputChange}
-            handleSubmit={handleSubmit}
-            setShowForm={setShowForm}
-            setEditingId={setEditingId}
-          />
+            {showForm && (
+              <OrderForm
+                formData={formData}
+                editingId={editingId}
+                handleInputChange={handleInputChange}
+                handleSubmit={handleSubmit}
+                setShowForm={setShowForm}
+                setEditingId={setEditingId}
+              />
+            )}
+          </>
         )}
 
-        {/* Orders List/Calendar */}
+        {/* Orders List/Calendar/Inventory */}
         {view === 'list' ? (
           <DashboardTable
             orders={displayOrders}
@@ -478,18 +490,22 @@ const App = () => {
             isLoading={isLoading}
             authHeaders={getAuthHeader()}
           />
-        ) : (
+        ) : view === 'calendar' ? (
           <CalendarView orders={displayOrders} appointments={appointments} />
+        ) : (
+          <InventoryView authHeaders={getAuthHeader()} />
         )}
 
         {/* Footer */}
-        <div className="text-center mt-4 text-sm text-gray-600">
-          {isLoading
-            ? "Fetching all records..."
-            : globalStats.total > 0
-              ? `Displaying ${displayOrders.length} of ${globalStats.total} orders`
-              : "No orders found."}
-        </div>
+        {view !== 'inventory' && (
+          <div className="text-center mt-4 text-sm text-gray-650">
+            {isLoading
+              ? "Fetching all records..."
+              : globalStats.total > 0
+                ? `Displaying ${displayOrders.length} of ${globalStats.total} orders`
+                : "No orders found."}
+          </div>
+        )}
       </div>
 
       {/* CONFIRM DELETE MODAL */}
