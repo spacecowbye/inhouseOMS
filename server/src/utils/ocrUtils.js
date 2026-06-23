@@ -24,3 +24,75 @@ export async function extractPriceFromImage(buffer) {
         return null;
     }
 }
+
+/**
+ * Uses Gemini API to perform multimodal OCR extraction of delivery details from an image buffer.
+ * Returns a JSON object with name, mobile, address, pincode, total, advance, awb, and notes.
+ */
+export async function extractDeliveryDetailsFromImage(buffer, contentType) {
+    try {
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (!apiKey || apiKey === 'your_gemini_api_key_here') {
+            console.error('[OCR] Gemini API key not configured.');
+            return null;
+        }
+
+        const base64Image = buffer.toString('base64');
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+
+        const prompt = `Extract delivery details from this shipping label, receipt, handwritten address slip, or order image.
+Return a JSON object with the following fields:
+- 'name' (string, full name of the recipient/customer)
+- 'mobile' (string, phone/mobile number, clean of spaces/dashes, ideally 10 digits)
+- 'address' (string, full shipping address; if a postal code is present in the image, ensure it is included here)
+- 'pincode' (string, postal code / zip code / pincode extracted from the address)
+- 'total' (number or null, total amount to be paid or value if visible)
+- 'advance' (number or null, advance paid if visible)
+- 'awb' (string or null, courier/tracking number if visible)
+- 'notes' (string or null, any other delivery or order notes)`;
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                contents: [
+                    {
+                        parts: [
+                            { text: prompt },
+                            {
+                                inlineData: {
+                                    mimeType: contentType || 'image/jpeg',
+                                    data: base64Image
+                                }
+                            }
+                        ]
+                    }
+                ],
+                generationConfig: {
+                    responseMimeType: "application/json"
+                }
+            })
+        });
+
+        if (!response.ok) {
+            const errText = await response.text();
+            console.error(`[OCR] Gemini API HTTP error: ${response.status}`, errText);
+            return null;
+        }
+
+        const resData = await response.json();
+        const responseText = resData.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!responseText) {
+            console.error('[OCR] Empty response from Gemini API.');
+            return null;
+        }
+
+        console.log('[OCR GEMINI RAW]', responseText);
+        return JSON.parse(responseText.trim());
+    } catch (err) {
+        console.error('[OCR] Gemini error:', err);
+        return null;
+    }
+}

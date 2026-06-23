@@ -2,7 +2,7 @@ import { PutObjectCommand } from '@aws-sdk/client-s3';
 import twilio from 'twilio';
 import { generateInvoiceBuffer } from './invoiceGenerator.js';
 import sharp from 'sharp';
-import { extractPriceFromImage } from './src/utils/ocrUtils.js';
+import { extractPriceFromImage, extractDeliveryDetailsFromImage } from './src/utils/ocrUtils.js';
 import { generateSkuId } from './src/utils/skuUtils.js';
 
 const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -235,6 +235,67 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
         const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
         const text = Body.trim();
         const lowerText = text.toLowerCase();
+
+        // --- OCR DELIVERY BRANCH ---
+        if (lowerText.startsWith('/ocrdelivery')) {
+            if (!MediaUrl0) {
+                res.set('Content-Type', 'text/xml');
+                return res.send(`<Response><Message>❌ Please attach a photo of the delivery address or receipt with the caption */ocrdelivery*.</Message></Response>`);
+            }
+
+            try {
+                // 1. Download media
+                const { buffer, contentType } = await downloadMedia(MediaUrl0);
+
+                // 2. Call Gemini OCR
+                const details = await extractDeliveryDetailsFromImage(buffer, contentType);
+
+                if (!details) {
+                    res.set('Content-Type', 'text/xml');
+                    return res.send(`<Response><Message>❌ Failed to extract delivery details using Gemini. Please verify your GEMINI_API_KEY or try another photo.</Message></Response>`);
+                }
+
+                // 3. Clean fields (replace commas with spaces to not break custom command parser)
+                const name = (details.name || '').replace(/,/g, ' ').trim();
+                const mobile = (details.mobile || '').replace(/,/g, ' ').trim();
+                const address = (details.address || '').replace(/,/g, ' ').trim();
+                const total = details.total !== null && details.total !== undefined ? details.total : 0;
+                const advance = details.advance !== null && details.advance !== undefined ? details.advance : 0;
+                const awb = (details.awb || '').replace(/,/g, ' ').trim();
+                
+                // Keep pincode info in notes if available
+                let notes = (details.notes || '').replace(/,/g, ' ').trim();
+                if (details.pincode) {
+                    const pinStr = `Pincode: ${details.pincode}`;
+                    if (!notes.toLowerCase().includes(details.pincode.toLowerCase())) {
+                        notes = notes ? `${notes} (${pinStr})` : pinStr;
+                    }
+                }
+
+                // 4. Construct copy-pasteable command
+                // Format: /delivery Name, Mobile, Address, Total, Advance, AWB, Notes
+                const generatedCommand = `/delivery ${name || 'Name'}, ${mobile || 'Mobile'}, ${address || 'Address'}, ${total}, ${advance}, ${awb}, ${notes}`;
+
+                const responseMessage = `🤖 *OCR Delivery Details Extracted*\n\n` +
+                    `👤 *Name:* ${name || '—'}\n` +
+                    `📞 *Mobile:* ${mobile || '—'}\n` +
+                    `📍 *Address:* ${address || '—'}\n` +
+                    `💰 *Total:* ₹${total.toLocaleString('en-IN')}\n` +
+                    `💵 *Advance:* ₹${advance.toLocaleString('en-IN')}\n` +
+                    `📦 *AWB:* ${awb || '—'}\n` +
+                    `📝 *Notes:* ${notes || '—'}\n\n` +
+                    `📋 *Copy & Paste Command:*\n\n` +
+                    `\`${generatedCommand}\``;
+
+                res.set('Content-Type', 'text/xml');
+                return res.send(`<Response><Message>${responseMessage}</Message></Response>`);
+
+            } catch (err) {
+                logError('[OCR DELIVERY] Error processing:', err);
+                res.set('Content-Type', 'text/xml');
+                return res.send(`<Response><Message>❌ Error processing OCR delivery request. Please try again.</Message></Response>`);
+            }
+        }
 
         // --- POLKI INVENTORY INGEST BRANCH ---
         if (lowerText.includes('polki') && MediaUrl0) {
