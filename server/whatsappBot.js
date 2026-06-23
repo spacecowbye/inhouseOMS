@@ -239,8 +239,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
         // --- OCR DELIVERY BRANCH ---
         if (lowerText.startsWith('/ocrdelivery')) {
             if (!MediaUrl0) {
-                res.set('Content-Type', 'text/xml');
-                return res.send(`<Response><Message>❌ Please attach a photo of the delivery address or receipt with the caption */ocrdelivery*.</Message></Response>`);
+                return sendTwiML(res, '❌ Please attach a photo of the delivery address or receipt with the caption */ocrdelivery*.');
             }
 
             try {
@@ -251,8 +250,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                 const details = await extractDeliveryDetailsFromImage(buffer, contentType);
 
                 if (!details) {
-                    res.set('Content-Type', 'text/xml');
-                    return res.send(`<Response><Message>❌ Failed to extract delivery details using Gemini. Please verify your GEMINI_API_KEY or try another photo.</Message></Response>`);
+                    return sendTwiML(res, '❌ Failed to extract delivery details using Gemini. Please verify your GEMINI_API_KEY or try another photo.');
                 }
 
                 // 3. Clean fields (replace commas with spaces to not break custom command parser)
@@ -287,13 +285,11 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                     `📋 *Copy & Paste Command:*\n\n` +
                     `\`${generatedCommand}\``;
 
-                res.set('Content-Type', 'text/xml');
-                return res.send(`<Response><Message>${responseMessage}</Message></Response>`);
+                return sendTwiML(res, responseMessage);
 
             } catch (err) {
                 logError('[OCR DELIVERY] Error processing:', err);
-                res.set('Content-Type', 'text/xml');
-                return res.send(`<Response><Message>❌ Error processing OCR delivery request. Please try again.</Message></Response>`);
+                return sendTwiML(res, '❌ Error processing OCR delivery request. Please try again.');
             }
         }
 
