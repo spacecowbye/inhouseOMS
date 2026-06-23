@@ -282,10 +282,11 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                     `💵 *Advance:* ₹${advance.toLocaleString('en-IN')}\n` +
                     `📦 *AWB:* ${awb || '—'}\n` +
                     `📝 *Notes:* ${notes || '—'}\n\n` +
-                    `📋 *Copy & Paste Command:*\n\n` +
-                    `\`${generatedCommand}\``;
+                    `📋 _The copy-pasteable command has been sent in the next message._`;
 
-                return sendTwiML(res, responseMessage);
+                sendTwiML(res, responseMessage);
+                await sendWhatsApp(From, generatedCommand);
+                return;
 
             } catch (err) {
                 logError('[OCR DELIVERY] Error processing:', err);
