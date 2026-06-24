@@ -383,6 +383,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                          `🛠 *REPAIR:* \`/repair Name, Mobile, Address, Total, Advance, Karigar, Notes\`\n` +
                          `📝 *ORDER:* \`/order Name, Mobile, Address, Total, Advance, Notes\`\n` +
                          `🚚 *DELIVERY:* \`/delivery Name, Mobile, Address, Total, Advance, AWB, Notes\`\n` +
+                         `📸 *OCR DELIVERY:* Send photo with caption \`/ocrdelivery\`\n` +
                          `✅ *COLLECTED:* \`/rc ID\` (Mark Collected + Stamped Invoice)\n` +
                          `📄 *INVOICE:* \`/generate ID\` (Normal PDF)\n` +
                          `📹 *APPT (Today):* \`/a Name, Mobile, Time, Notes, Date\`\n` +
@@ -404,9 +405,19 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
             } else if (lowerText.includes('delivery')) {
                 const deliveryHelp = `🚚 *DELIVERY Order Format*\n${sepInfo}\n\n` +
                           `*Command:*\n/delivery Name, Mobile, Address, Total, Advance, AWB, Notes\n\n` +
-                          `*Example:*\n/delivery Priya, 9876543210, 56 Park Ave, 20000, 20000, TRACK123, Ship urgent`;
+                          `*Example:*\n/delivery Priya, 9876543210, 56 Park Ave, 20000, 20000, TRACK123, Ship urgent\n\n` +
+                          `📸 *OCR Delivery:*\n` +
+                          `Send a photo (address label, slip, etc.) with the caption */ocrdelivery* to auto-extract details and generate a pre-filled command.`;
                 res.set('Content-Type', 'text/xml');
                 return res.send(`<Response><Message>${deliveryHelp}</Message></Response>`);
+            } else if (lowerText.includes('ocr') || lowerText.includes('ocrdelivery')) {
+                const ocrHelp = `📸 *OCR DELIVERY Command*\n\n` +
+                          `To auto-generate a pre-filled delivery entry:\n` +
+                          `1. Send an image (shipping label, written slip, or receipt) on WhatsApp.\n` +
+                          `2. Set the caption of the photo to */ocrdelivery*.\n` +
+                          `3. The bot will reply with the extracted details and a separate copy-pasteable /delivery command.`;
+                res.set('Content-Type', 'text/xml');
+                return res.send(`<Response><Message>${ocrHelp}</Message></Response>`);
             } else if (lowerText.includes('appointment')) {
                 const apptHelp = `📹 *VIDEO CALL Appointment*\n${sepInfo}\n\n` +
                           `*Command:*\n/a Name, Mobile, Time, Notes, Date\n\n` +
