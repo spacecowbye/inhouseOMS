@@ -317,86 +317,95 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                 return sendTwiML(res, '❌ Please attach a photo of the delivery address or receipt with the caption */ocrdelivery*.');
             }
 
-            try {
-                // 1. Download media
-                const { buffer, contentType } = await downloadMedia(MediaUrl0);
+            // Respond immediately to prevent Twilio HTTP timeout (15s limit)
+            sendTwiML(res, '⏳ *Processing image...* Gemini is extracting delivery details. Please wait a moment.');
 
-                // 2. Call Gemini OCR
-                const details = await extractDeliveryDetailsFromImage(buffer, contentType);
+            // Process asynchronously in the background
+            (async () => {
+                try {
+                    // 1. Download media
+                    const { buffer, contentType } = await downloadMedia(MediaUrl0);
 
-                if (!details) {
-                    return sendTwiML(res, '❌ Failed to extract delivery details using Gemini. Please verify your GEMINI_API_KEY or try another photo.');
-                }
+                    // 2. Call Gemini OCR
+                    const details = await extractDeliveryDetailsFromImage(buffer, contentType);
 
-                // 3. Clean fields (replace commas with spaces to not break custom command parser)
-                const name = (details.name || '').replace(/,/g, ' ').trim();
-                const mobile = (details.mobile || '').replace(/,/g, ' ').trim();
-                const address = (details.address || '').replace(/,/g, ' ').trim();
-                const total = details.total !== null && details.total !== undefined ? details.total : 0;
-                const advance = details.advance !== null && details.advance !== undefined ? details.advance : 0;
-                const awb = (details.awb || '').replace(/,/g, ' ').trim();
-                
-                // Keep pincode info in notes if available
-                let notes = (details.notes || '').replace(/,/g, ' ').trim();
-                if (details.pincode) {
-                    const pinStr = `Pincode: ${details.pincode}`;
-                    if (!notes.toLowerCase().includes(details.pincode.toLowerCase())) {
-                        notes = notes ? `${notes} (${pinStr})` : pinStr;
+                    if (!details) {
+                        await sendWhatsApp(From, '❌ Failed to extract delivery details using Gemini. Please try again with a clearer photo.');
+                        return;
                     }
+
+                    // 3. Clean fields (replace commas with spaces to not break custom command parser)
+                    const name = (details.name || '').replace(/,/g, ' ').trim();
+                    const mobile = (details.mobile || '').replace(/,/g, ' ').trim();
+                    const address = (details.address || '').replace(/,/g, ' ').trim();
+                    const total = details.total !== null && details.total !== undefined ? details.total : 0;
+                    const advance = details.advance !== null && details.advance !== undefined ? details.advance : 0;
+                    const awb = (details.awb || '').replace(/,/g, ' ').trim();
+                    
+                    // Keep pincode info in notes if available
+                    let notes = (details.notes || '').replace(/,/g, ' ').trim();
+                    if (details.pincode) {
+                        const pinStr = `Pincode: ${details.pincode}`;
+                        if (!notes.toLowerCase().includes(details.pincode.toLowerCase())) {
+                            notes = notes ? `${notes} (${pinStr})` : pinStr;
+                        }
+                    }
+
+                    // --- VALIDATION & WARNINGS ---
+                    const warnings = [];
+
+                    // 1. Mobile validation
+                    const mobileDigits = mobile.replace(/\D/g, '');
+                    if (!mobileDigits) {
+                        warnings.push('📞 *Mobile number is missing!*');
+                    } else if (mobileDigits.length < 10) {
+                        warnings.push(`📞 *Mobile number is less than 10 digits:* ${mobile}`);
+                    }
+
+                    // 2. Pincode validation
+                    const cleanPincode = (details.pincode || '').toString().trim().replace(/\s/g, '');
+                    if (!cleanPincode) {
+                        warnings.push('📍 *Pincode is missing!*');
+                    } else if (!/^\d{6}$/.test(cleanPincode)) {
+                        warnings.push(`📍 *Pincode is invalid (must be exactly 6 digits):* ${details.pincode || 'none'}`);
+                    }
+
+                    // 3. AWB (Tracking number) validation
+                    if (!awb) {
+                        warnings.push('📦 *AWB (Tracking number) is missing!*');
+                    }
+
+                    let warningText = '';
+                    if (warnings.length > 0) {
+                        warningText = `\n⚠️ *CRITICAL VERIFICATION WARNINGS:*\n` + warnings.map(w => `- ${w}`).join('\n') + `\n`;
+                    }
+
+                    // 4. Construct copy-pasteable command
+                    // Format: /delivery Name, Mobile, Address, Total, Advance, AWB, Notes
+                    const generatedCommand = `/delivery ${name || 'Name'}, ${mobile || 'Mobile'}, ${address || 'Address'}, ${total}, ${advance}, ${awb}, ${notes}`;
+
+                    const responseMessage = `🤖 *OCR Delivery Details Extracted*\n\n` +
+                        `👤 *Name:* ${name || '—'}\n` +
+                        `📞 *Mobile:* ${mobile || '—'}${mobileDigits.length < 10 ? ' (⚠️ check)' : ''}\n` +
+                        `📍 *Address:* ${address || '—'}\n` +
+                        `💰 *Total:* ₹${total.toLocaleString('en-IN')}\n` +
+                        `💵 *Advance:* ₹${advance.toLocaleString('en-IN')}\n` +
+                        `📦 *AWB:* ${awb || '—'}${!awb ? ' (⚠️ check)' : ''}\n` +
+                        `📝 *Notes:* ${notes || '—'}\n` +
+                        warningText + `\n` +
+                        `📋 _The copy-pasteable command has been sent in the next message._`;
+
+                    // Send summary card & copy-pasteable command as two separate outbound WhatsApp messages
+                    await sendWhatsApp(From, responseMessage);
+                    await sendWhatsApp(From, generatedCommand);
+
+                } catch (err) {
+                    logError('[OCR DELIVERY] Error processing:', err);
+                    await sendWhatsApp(From, '❌ Error processing OCR delivery request. Please try again.');
                 }
+            })();
 
-                // --- VALIDATION & WARNINGS ---
-                const warnings = [];
-
-                // 1. Mobile validation
-                const mobileDigits = mobile.replace(/\D/g, '');
-                if (!mobileDigits) {
-                    warnings.push('📞 *Mobile number is missing!*');
-                } else if (mobileDigits.length < 10) {
-                    warnings.push(`📞 *Mobile number is less than 10 digits:* ${mobile}`);
-                }
-
-                // 2. Pincode validation
-                const cleanPincode = (details.pincode || '').toString().trim().replace(/\s/g, '');
-                if (!cleanPincode) {
-                    warnings.push('📍 *Pincode is missing!*');
-                } else if (!/^\d{6}$/.test(cleanPincode)) {
-                    warnings.push(`📍 *Pincode is invalid (must be exactly 6 digits):* ${details.pincode || 'none'}`);
-                }
-
-                // 3. AWB (Tracking number) validation
-                if (!awb) {
-                    warnings.push('📦 *AWB (Tracking number) is missing!*');
-                }
-
-                let warningText = '';
-                if (warnings.length > 0) {
-                    warningText = `\n⚠️ *CRITICAL VERIFICATION WARNINGS:*\n` + warnings.map(w => `- ${w}`).join('\n') + `\n`;
-                }
-
-                // 4. Construct copy-pasteable command
-                // Format: /delivery Name, Mobile, Address, Total, Advance, AWB, Notes
-                const generatedCommand = `/delivery ${name || 'Name'}, ${mobile || 'Mobile'}, ${address || 'Address'}, ${total}, ${advance}, ${awb}, ${notes}`;
-
-                const responseMessage = `🤖 *OCR Delivery Details Extracted*\n\n` +
-                    `👤 *Name:* ${name || '—'}\n` +
-                    `📞 *Mobile:* ${mobile || '—'}${mobileDigits.length < 10 ? ' (⚠️ check)' : ''}\n` +
-                    `📍 *Address:* ${address || '—'}\n` +
-                    `💰 *Total:* ₹${total.toLocaleString('en-IN')}\n` +
-                    `💵 *Advance:* ₹${advance.toLocaleString('en-IN')}\n` +
-                    `📦 *AWB:* ${awb || '—'}${!awb ? ' (⚠️ check)' : ''}\n` +
-                    `📝 *Notes:* ${notes || '—'}\n` +
-                    warningText + `\n` +
-                    `📋 _The copy-pasteable command has been sent in the next message._`;
-
-                sendTwiML(res, responseMessage);
-                await sendWhatsApp(From, generatedCommand);
-                return;
-
-            } catch (err) {
-                logError('[OCR DELIVERY] Error processing:', err);
-                return sendTwiML(res, '❌ Error processing OCR delivery request. Please try again.');
-            }
+            return;
         }
 
         // --- POLKI INVENTORY INGEST BRANCH ---
