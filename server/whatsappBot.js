@@ -49,33 +49,7 @@ async function executeSessionOrder(senderKey, session, db, s3, bucket, region) {
             return sendWhatsApp(senderKey, `❌ Database Error: Failed to save your ${command.commandType} order.`);
         }
 
-        // Create Order Object for PDF
-        const order = {
-            id: this.lastID, 
-            firstName: command.firstName, 
-            lastName: command.lastName, 
-            mobile: command.mobile, 
-            address: command.address, 
-            totalAmount: command.totalAmount, 
-            advancePaid: command.advancePaid, 
-            remainingAmount: command.remainingAmount,
-            type: command.commandType, 
-            karigarName: command.karigarName, 
-            notes: command.notes, 
-            photoUrl: finalPhotoUrl
-        };
-
-        const s3Url = await createAndUploadInvoice(order, s3, bucket, region);
-        const invoiceUrl = s3Url || `https://deepasoms.duckdns.org/api/orders/${this.lastID}/invoice?t=${Date.now()}`;
-
         const formatDisp = (val) => (val === -1) ? 'TBD' : (val || 0).toLocaleString();
-
-        let waLink = "No mobile number";
-        if (command.mobile) {
-            const cleanMobile = normalizeMobile(command.mobile);
-            const customerMsg = `Hi ${command.firstName}, here is your invoice: ${invoiceUrl}`;
-            waLink = `https://wa.me/${cleanMobile}?text=${encodeURIComponent(customerMsg)}`;
-        }
 
         let responseText = `✅ *${command.commandType} Created!* (ID: ${this.lastID})\n` +
             `👤 ${command.firstName} ${command.lastName}\n` +
@@ -86,7 +60,35 @@ async function executeSessionOrder(senderKey, session, db, s3, bucket, region) {
         if (command.commandType === 'Repair' && command.karigarName) responseText += `\n🔨 Karigar: ${command.karigarName}`;
         if (command.commandType === 'Delivery' && command.trackingNumber) responseText += `\n📦 AWB: ${command.trackingNumber}`;
         
-        responseText += `\n\n👉 *Chat with Customer:*\n${waLink}\n\n📄 *Invoice URL:* ${invoiceUrl}`;
+        if (command.commandType !== 'Delivery') {
+            // Create Order Object for PDF
+            const order = {
+                id: this.lastID, 
+                firstName: command.firstName, 
+                lastName: command.lastName, 
+                mobile: command.mobile, 
+                address: command.address, 
+                totalAmount: command.totalAmount, 
+                advancePaid: command.advancePaid, 
+                remainingAmount: command.remainingAmount,
+                type: command.commandType, 
+                karigarName: command.karigarName, 
+                notes: command.notes, 
+                photoUrl: finalPhotoUrl
+            };
+
+            const s3Url = await createAndUploadInvoice(order, s3, bucket, region);
+            const invoiceUrl = s3Url || `https://deepasoms.duckdns.org/api/orders/${this.lastID}/invoice?t=${Date.now()}`;
+
+            let waLink = "No mobile number";
+            if (command.mobile) {
+                const cleanMobile = normalizeMobile(command.mobile);
+                const customerMsg = `Hi ${command.firstName}, here is your invoice: ${invoiceUrl}`;
+                waLink = `https://wa.me/${cleanMobile}?text=${encodeURIComponent(customerMsg)}`;
+            }
+
+            responseText += `\n\n👉 *Chat with Customer:*\n${waLink}\n\n📄 *Invoice URL:* ${invoiceUrl}`;
+        }
 
         // Send outbound confirmation message
         await sendWhatsApp(senderKey, responseText);
@@ -1143,25 +1145,8 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                 return res.status(500).send('<Response><Message>❌ Database Error</Message></Response>');
             }
 
-            // Create Order Object for PDF
-            const order = {
-                id: this.lastID, firstName, lastName, mobile, address, 
-                totalAmount, advancePaid, remainingAmount,
-                type: commandType, karigarName, notes, photoUrl
-            };
-
-            const s3Url = await createAndUploadInvoice(order, s3, bucket, region);
-            const invoiceUrl = s3Url || `https://deepasoms.duckdns.org/api/orders/${this.lastID}/invoice?t=${Date.now()}`;
-
             // Success Response
             const formatDisp = (val) => (val === -1) ? 'TBD' : (val || 0).toLocaleString();
-
-            let waLink = "No mobile number";
-            if (mobile) {
-                const cleanMobile = normalizeMobile(mobile);
-                const customerMsg = `Hi ${firstName}, here is your invoice: ${invoiceUrl}`;
-                waLink = `https://wa.me/${cleanMobile}?text=${encodeURIComponent(customerMsg)}`;
-            }
 
             let responseText = `✅ *${commandType} Created!* (ID: ${this.lastID})\n` +
                 `👤 ${firstName} ${lastName}\n` +
@@ -1172,7 +1157,27 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
             if (commandType === 'Delivery' && trackingNumber) responseText += `\n📦 AWB: ${trackingNumber}`;
             if (photoUrl) responseText += `\n🖼 Photo Attached`;
             
-            responseText += `\n\n👉 *Chat with Customer:*\n${waLink}\n\n📄 *Invoice URL:* ${invoiceUrl}`;
+            let invoiceUrl = null;
+            if (commandType !== 'Delivery') {
+                // Create Order Object for PDF
+                const order = {
+                    id: this.lastID, firstName, lastName, mobile, address, 
+                    totalAmount, advancePaid, remainingAmount,
+                    type: commandType, karigarName, notes, photoUrl
+                };
+
+                const s3Url = await createAndUploadInvoice(order, s3, bucket, region);
+                invoiceUrl = s3Url || `https://deepasoms.duckdns.org/api/orders/${this.lastID}/invoice?t=${Date.now()}`;
+
+                let waLink = "No mobile number";
+                if (mobile) {
+                    const cleanMobile = normalizeMobile(mobile);
+                    const customerMsg = `Hi ${firstName}, here is your invoice: ${invoiceUrl}`;
+                    waLink = `https://wa.me/${cleanMobile}?text=${encodeURIComponent(customerMsg)}`;
+                }
+
+                responseText += `\n\n👉 *Chat with Customer:*\n${waLink}\n\n📄 *Invoice URL:* ${invoiceUrl}`;
+            }
 
             return sendTwiML(res, responseText, commandType === 'Repair' ? invoiceUrl : null);
         });
