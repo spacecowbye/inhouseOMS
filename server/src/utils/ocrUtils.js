@@ -42,13 +42,14 @@ export async function extractDeliveryDetailsFromImage(buffer, contentType) {
 
         const prompt = `Extract delivery details from this shipping label, receipt, handwritten address slip, or order image.
 Return a JSON object with the following fields:
+- 'is_blurry' (boolean, set to true if the image is too blurry, dark, out of focus, low-resolution, or contains no readable/extractable text; otherwise false)
 - 'name' (string, full name of the recipient/customer)
-- 'mobile' (string, phone/mobile number, clean of spaces/dashes, ideally 10 digits)
+- 'mobile' (string, phone/mobile number, clean of spaces/dashes, ideally 10 digits. IMPORTANT: Do NOT extract '9376871164', '937871164', or '9227219475' as the mobile number. Those are sender/shop numbers. Look for the other 10-digit number representing the recipient/customer.)
 - 'address' (string, full shipping address; if a postal code is present in the image, ensure it is included here)
 - 'pincode' (string, postal code / zip code / pincode extracted from the address)
 - 'total' (number or null, total amount to be paid or value if visible)
 - 'advance' (number or null, advance paid if visible)
-- 'awb' (string or null, courier/tracking number if visible)
+- 'awb' (string or null, courier/tracking number if visible. Note: The AWB is typically located near a barcode.)
 - 'notes' (string or null, any other delivery or order notes)`;
 
         const response = await fetch(url, {

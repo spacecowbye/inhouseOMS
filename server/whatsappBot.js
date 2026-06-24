@@ -334,6 +334,11 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                         return;
                     }
 
+                    if (details.is_blurry === true) {
+                        await sendWhatsApp(From, '❌ The photo appears too blurry, dark, or unreadable. Please attach a clearer, well-lit photo of the delivery label and try again.');
+                        return;
+                    }
+
                     // 3. Clean fields (replace commas with spaces to not break custom command parser)
                     const name = (details.name || '').replace(/,/g, ' ').trim();
                     const mobile = (details.mobile || '').replace(/,/g, ' ').trim();
