@@ -345,18 +345,48 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                     }
                 }
 
+                // --- VALIDATION & WARNINGS ---
+                const warnings = [];
+
+                // 1. Mobile validation
+                const mobileDigits = mobile.replace(/\D/g, '');
+                if (!mobileDigits) {
+                    warnings.push('📞 *Mobile number is missing!*');
+                } else if (mobileDigits.length < 10) {
+                    warnings.push(`📞 *Mobile number is less than 10 digits:* ${mobile}`);
+                }
+
+                // 2. Pincode validation
+                const cleanPincode = (details.pincode || '').toString().trim().replace(/\s/g, '');
+                if (!cleanPincode) {
+                    warnings.push('📍 *Pincode is missing!*');
+                } else if (!/^\d{6}$/.test(cleanPincode)) {
+                    warnings.push(`📍 *Pincode is invalid (must be exactly 6 digits):* ${details.pincode || 'none'}`);
+                }
+
+                // 3. AWB (Tracking number) validation
+                if (!awb) {
+                    warnings.push('📦 *AWB (Tracking number) is missing!*');
+                }
+
+                let warningText = '';
+                if (warnings.length > 0) {
+                    warningText = `\n⚠️ *CRITICAL VERIFICATION WARNINGS:*\n` + warnings.map(w => `- ${w}`).join('\n') + `\n`;
+                }
+
                 // 4. Construct copy-pasteable command
                 // Format: /delivery Name, Mobile, Address, Total, Advance, AWB, Notes
                 const generatedCommand = `/delivery ${name || 'Name'}, ${mobile || 'Mobile'}, ${address || 'Address'}, ${total}, ${advance}, ${awb}, ${notes}`;
 
                 const responseMessage = `🤖 *OCR Delivery Details Extracted*\n\n` +
                     `👤 *Name:* ${name || '—'}\n` +
-                    `📞 *Mobile:* ${mobile || '—'}\n` +
+                    `📞 *Mobile:* ${mobile || '—'}${mobileDigits.length < 10 ? ' (⚠️ check)' : ''}\n` +
                     `📍 *Address:* ${address || '—'}\n` +
                     `💰 *Total:* ₹${total.toLocaleString('en-IN')}\n` +
                     `💵 *Advance:* ₹${advance.toLocaleString('en-IN')}\n` +
-                    `📦 *AWB:* ${awb || '—'}\n` +
-                    `📝 *Notes:* ${notes || '—'}\n\n` +
+                    `📦 *AWB:* ${awb || '—'}${!awb ? ' (⚠️ check)' : ''}\n` +
+                    `📝 *Notes:* ${notes || '—'}\n` +
+                    warningText + `\n` +
                     `📋 _The copy-pasteable command has been sent in the next message._`;
 
                 sendTwiML(res, responseMessage);
