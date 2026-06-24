@@ -30,17 +30,21 @@ export async function extractPriceFromImage(buffer) {
  * Returns a JSON object with name, mobile, address, pincode, total, advance, awb, and notes.
  */
 export async function extractDeliveryDetailsFromImage(buffer, contentType) {
-    try {
-        const apiKey = process.env.GEMINI_API_KEY;
-        if (!apiKey || apiKey === 'your_gemini_api_key_here') {
-            console.error('[OCR] Gemini API key not configured.');
-            return null;
-        }
+    const maxRetries = 3;
+    let delay = 1000; // start with 1 second delay
 
-        const base64Image = buffer.toString('base64');
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            const apiKey = process.env.GEMINI_API_KEY;
+            if (!apiKey || apiKey === 'your_gemini_api_key_here') {
+                console.error('[OCR] Gemini API key not configured.');
+                return null;
+            }
 
-        const prompt = `Extract delivery details from this shipping label, receipt, handwritten address slip, or order image.
+            const base64Image = buffer.toString('base64');
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+
+            const prompt = `Extract delivery details from this shipping label, receipt, handwritten address slip, or order image.
 Return a JSON object with the following fields:
 - 'is_blurry' (boolean, set to true if the image is too blurry, dark, out of focus, low-resolution, or contains no readable/extractable text; otherwise false)
 - 'name' (string, full name of the recipient/customer)
@@ -52,48 +56,65 @@ Return a JSON object with the following fields:
 - 'awb' (string or null, courier/tracking number if visible. Note: The AWB is typically located near a barcode.)
 - 'notes' (string or null, any other delivery or order notes)`;
 
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                contents: [
-                    {
-                        parts: [
-                            { text: prompt },
-                            {
-                                inlineData: {
-                                    mimeType: contentType || 'image/jpeg',
-                                    data: base64Image
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    contents: [
+                        {
+                            parts: [
+                                { text: prompt },
+                                {
+                                    inlineData: {
+                                        mimeType: contentType || 'image/jpeg',
+                                        data: base64Image
+                                    }
                                 }
-                            }
-                        ]
+                            ]
+                        }
+                    ],
+                    generationConfig: {
+                        responseMimeType: "application/json"
                     }
-                ],
-                generationConfig: {
-                    responseMimeType: "application/json"
+                })
+            });
+
+            if (!response.ok) {
+                const errText = await response.text();
+                console.warn(`[OCR] Gemini API HTTP error (Attempt ${attempt}/${maxRetries}): ${response.status}`, errText);
+                
+                // If transient capacity spike (503) or rate limit (429), retry after a delay
+                if ((response.status === 503 || response.status === 429) && attempt < maxRetries) {
+                    console.log(`[OCR] Retrying in ${delay}ms...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    delay *= 2; // exponential backoff
+                    continue;
                 }
-            })
-        });
+                return null;
+            }
 
-        if (!response.ok) {
-            const errText = await response.text();
-            console.error(`[OCR] Gemini API HTTP error: ${response.status}`, errText);
+            const resData = await response.json();
+            const responseText = resData.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (!responseText) {
+                console.error('[OCR] Empty response from Gemini API.');
+                return null;
+            }
+
+            console.log('[OCR GEMINI RAW]', responseText);
+            return JSON.parse(responseText.trim());
+
+        } catch (err) {
+            console.error(`[OCR] Gemini error (Attempt ${attempt}/${maxRetries}):`, err);
+            if (attempt < maxRetries) {
+                console.log(`[OCR] Retrying in ${delay}ms...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                delay *= 2;
+                continue;
+            }
             return null;
         }
-
-        const resData = await response.json();
-        const responseText = resData.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (!responseText) {
-            console.error('[OCR] Empty response from Gemini API.');
-            return null;
-        }
-
-        console.log('[OCR GEMINI RAW]', responseText);
-        return JSON.parse(responseText.trim());
-    } catch (err) {
-        console.error('[OCR] Gemini error:', err);
-        return null;
     }
+    return null;
 }
