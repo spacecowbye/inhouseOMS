@@ -26,15 +26,15 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        - VITE_API_BASE_URL=http://deepasoms.duckdns.org/api
+        - VITE_API_BASE_URL=https://deepasoms.duckdns.org/api
     container_name: jewelry_frontend
     restart: always
     ports:
       - "80:80"
-      # - "443:443"
+      - "443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      # - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
 
     depends_on:
       - api

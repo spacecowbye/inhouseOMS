@@ -566,7 +566,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
 
                     // GENERATE AND UPLOAD S3 PDF
                     const s3Url = await createAndUploadInvoice(row, s3, bucket, region);
-                    const invoiceUrl = s3Url || `http://deepasoms.duckdns.org/api/orders/${orderId}/invoice?t=${Date.now()}`;
+                    const invoiceUrl = s3Url || `https://deepasoms.duckdns.org/api/orders/${orderId}/invoice?t=${Date.now()}`;
                     
                     let waLink = "No mobile number";
                     if (row.mobile) {
@@ -605,7 +605,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                 }
 
                 const s3Url = await createAndUploadInvoice(row, s3, bucket, region);
-                const invoiceUrl = s3Url || `http://deepasoms.duckdns.org/api/orders/${orderId}/invoice?t=${Date.now()}`;
+                const invoiceUrl = s3Url || `https://deepasoms.duckdns.org/api/orders/${orderId}/invoice?t=${Date.now()}`;
                 
                 let waLink = "No mobile number";
                 if (row.mobile) {
@@ -853,7 +853,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
             };
 
             const s3Url = await createAndUploadInvoice(order, s3, bucket, region);
-            const invoiceUrl = s3Url || `http://deepasoms.duckdns.org/api/orders/${this.lastID}/invoice?t=${Date.now()}`;
+            const invoiceUrl = s3Url || `https://deepasoms.duckdns.org/api/orders/${this.lastID}/invoice?t=${Date.now()}`;
 
             // Success Response
             const formatDisp = (val) => (val === -1) ? 'TBD' : (val || 0).toLocaleString();
