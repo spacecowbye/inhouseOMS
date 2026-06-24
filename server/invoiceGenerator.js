@@ -98,26 +98,49 @@ export async function generateInvoiceBuffer(order) {
             doc.text('1', 50, rowY, { width: 30, align: 'center' });
 
             const urls = order.photoUrl ? order.photoUrl.split(',').map(u => u.trim()).filter(Boolean) : [];
-            const rowHeight = Math.max(120, urls.length * 110);
+            let rowHeight = 120;
 
-            if (urls.length > 0) {
+            if (urls.length === 1) {
+                const imgUrl = urls[0];
+                try {
+                    const imgResp = await fetch(imgUrl);
+                    if (imgResp.ok) {
+                        const imgBuffer = await imgResp.arrayBuffer();
+                        doc.image(Buffer.from(imgBuffer), 100, rowY, { fit: [100, 100], align: 'center' });
+                    } else {
+                        doc.text('[Image Error]', 90, rowY + 40, { width: 120, align: 'center' });
+                    }
+                } catch (e) {
+                    doc.text('[Image Error]', 90, rowY + 40, { width: 120, align: 'center' });
+                }
+            } else if (urls.length > 1) {
+                const numRows = Math.ceil(urls.length / 2);
+                rowHeight = Math.max(120, numRows * 55 + 10);
+                
                 for (let i = 0; i < urls.length; i++) {
                     const imgUrl = urls[i];
+                    const r = Math.floor(i / 2);
+                    const c = i % 2;
+                    const imgX = 95 + c * 60;
+                    const imgY = rowY + r * 55;
                     try {
                         const imgResp = await fetch(imgUrl);
                         if (imgResp.ok) {
                             const imgBuffer = await imgResp.arrayBuffer();
-                            doc.image(Buffer.from(imgBuffer), 100, rowY + (i * 110), { fit: [100, 100], align: 'center' });
+                            doc.image(Buffer.from(imgBuffer), imgX, imgY, { fit: [50, 50], align: 'center' });
                         } else {
-                            doc.text(`[Image ${i + 1} Error]`, 90, rowY + (i * 110), { width: 120, align: 'center' });
+                            doc.fontSize(8).text(`[Err ${i + 1}]`, imgX, imgY + 20, { width: 50, align: 'center' });
                         }
                     } catch (e) {
-                        doc.text(`[Image ${i + 1} Error]`, 90, rowY + (i * 110), { width: 120, align: 'center' });
+                        doc.fontSize(8).text(`[Err ${i + 1}]`, imgX, imgY + 20, { width: 50, align: 'center' });
                     }
                 }
             } else {
-                 doc.text('[No Image]', 90, rowY, { width: 120, align: 'center' });
+                 doc.text('[No Image]', 90, rowY + 40, { width: 120, align: 'center' });
             }
+
+            // Restore font size and type
+            doc.font('Helvetica').fontSize(10);
 
             doc.text(order.notes || 'Repair Work', 220, rowY, { width: 220 });
             doc.text(formatDisp(order.totalAmount), 450, rowY, { width: 90, align: 'right' });

@@ -18,21 +18,14 @@ const SLOT_MINUTES = 30;
 
 // Store active reminder timers in memory
 const reminderTimers = new Map();
-const pendingMediaGroups = new Map();
+const pendingPhotosSession = new Map();
 
-async function finalizeMediaGroupOrder(senderKey, db, s3, bucket, region) {
-    const group = pendingMediaGroups.get(senderKey);
-    if (!group) return;
+async function executeSessionOrder(senderKey, session, db, s3, bucket, region) {
+    log(`[PHOTOS-SESSION] Executing saved order for ${senderKey} with ${session.mediaUrls.length} photos.`);
+    
+    const finalPhotoUrl = session.mediaUrls.join(',');
+    const command = session.command;
 
-    // Remove from active groups
-    pendingMediaGroups.delete(senderKey);
-
-    log(`[MEDIA-GROUP] Finalizing order for ${group.firstName} with ${group.mediaUrls.length} photos.`);
-
-    // 1. Join all collected URLs
-    const finalPhotoUrl = group.mediaUrls.join(',');
-
-    // 2. Insert into DB
     const sql = `
         INSERT INTO orders (
             firstName, lastName, mobile, address, 
@@ -43,32 +36,32 @@ async function finalizeMediaGroupOrder(senderKey, db, s3, bucket, region) {
     `;
 
     const values = [
-        group.firstName, group.lastName, group.mobile, group.address,
-        group.totalAmount, group.advancePaid, group.remainingAmount,
-        group.commandType, group.karigarName, group.trackingNumber, group.notes,
-        finalPhotoUrl, group.today,
-        group.commandType === 'Delivery' ? group.today : null
+        command.firstName, command.lastName, command.mobile, command.address,
+        command.totalAmount, command.advancePaid, command.remainingAmount,
+        command.commandType, command.karigarName, command.trackingNumber, command.notes,
+        finalPhotoUrl, command.today,
+        command.commandType === 'Delivery' ? command.today : null
     ];
 
     db.run(sql, values, async function (err) {
         if (err) {
-            logError('[MEDIA-GROUP] DB Error:', err);
-            return sendWhatsApp(senderKey, `❌ Database Error: Failed to save your ${group.commandType} order.`);
+            logError('[PHOTOS-SESSION] DB Error:', err);
+            return sendWhatsApp(senderKey, `❌ Database Error: Failed to save your ${command.commandType} order.`);
         }
 
         // Create Order Object for PDF
         const order = {
             id: this.lastID, 
-            firstName: group.firstName, 
-            lastName: group.lastName, 
-            mobile: group.mobile, 
-            address: group.address, 
-            totalAmount: group.totalAmount, 
-            advancePaid: group.advancePaid, 
-            remainingAmount: group.remainingAmount,
-            type: group.commandType, 
-            karigarName: group.karigarName, 
-            notes: group.notes, 
+            firstName: command.firstName, 
+            lastName: command.lastName, 
+            mobile: command.mobile, 
+            address: command.address, 
+            totalAmount: command.totalAmount, 
+            advancePaid: command.advancePaid, 
+            remainingAmount: command.remainingAmount,
+            type: command.commandType, 
+            karigarName: command.karigarName, 
+            notes: command.notes, 
             photoUrl: finalPhotoUrl
         };
 
@@ -78,20 +71,20 @@ async function finalizeMediaGroupOrder(senderKey, db, s3, bucket, region) {
         const formatDisp = (val) => (val === -1) ? 'TBD' : (val || 0).toLocaleString();
 
         let waLink = "No mobile number";
-        if (group.mobile) {
-            const cleanMobile = normalizeMobile(group.mobile);
-            const customerMsg = `Hi ${group.firstName}, here is your invoice: ${invoiceUrl}`;
+        if (command.mobile) {
+            const cleanMobile = normalizeMobile(command.mobile);
+            const customerMsg = `Hi ${command.firstName}, here is your invoice: ${invoiceUrl}`;
             waLink = `https://wa.me/${cleanMobile}?text=${encodeURIComponent(customerMsg)}`;
         }
 
-        let responseText = `✅ *${group.commandType} Created!* (ID: ${this.lastID})\n` +
-            `👤 ${group.firstName} ${group.lastName}\n` +
-            `📱 ${group.mobile}\n` +
-            `💰 Bal: ${formatDisp(group.remainingAmount)}\n` +
-            `🖼 Photos Attached: ${group.mediaUrls.length}`;
+        let responseText = `✅ *${command.commandType} Created!* (ID: ${this.lastID})\n` +
+            `👤 ${command.firstName} ${command.lastName}\n` +
+            `📱 ${command.mobile}\n` +
+            `💰 Bal: ${formatDisp(command.remainingAmount)}\n` +
+            `🖼 Photos Attached: ${session.mediaUrls.length}`;
 
-        if (group.commandType === 'Repair' && group.karigarName) responseText += `\n🔨 Karigar: ${group.karigarName}`;
-        if (group.commandType === 'Delivery' && group.trackingNumber) responseText += `\n📦 AWB: ${group.trackingNumber}`;
+        if (command.commandType === 'Repair' && command.karigarName) responseText += `\n🔨 Karigar: ${command.karigarName}`;
+        if (command.commandType === 'Delivery' && command.trackingNumber) responseText += `\n📦 AWB: ${command.trackingNumber}`;
         
         responseText += `\n\n👉 *Chat with Customer:*\n${waLink}\n\n📄 *Invoice URL:* ${invoiceUrl}`;
 
@@ -462,9 +455,10 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
         
         // --- HELP HANDLERS ---
         const fullHelp = `🤖 *Deepa's Jewelry Bot - All Commands*\n\n` +
-                         `🛠 *REPAIR:* \`/repair Name, Mobile, Address, Total, Advance, Karigar, [NumPhotos], Notes\`\n` +
-                         `📝 *ORDER:* \`/order Name, Mobile, Address, Total, Advance, [NumPhotos], Notes\`\n` +
-                         `🚚 *DELIVERY:* \`/delivery Name, Mobile, Address, Total, Advance, AWB, [NumPhotos], Notes\`\n` +
+                         `🛠 *REPAIR:* \`/repair Name, Mobile, Address, Total, Advance, Karigar, Notes\`\n` +
+                         `📝 *ORDER:* \`/order Name, Mobile, Address, Total, Advance, Notes\`\n` +
+                         `🚚 *DELIVERY:* \`/delivery Name, Mobile, Address, Total, Advance, AWB, Notes\`\n` +
+                         `📸 *PHOTOS:* \`/photos <number>\` (Pre-declare multiple photos, e.g. /photos 3)\n` +
                          `📸 *OCR DELIVERY:* Send photo with caption \`/ocrdelivery\`\n` +
                          `✅ *COLLECTED:* \`/rc ID\` (Mark Collected + Stamped Invoice)\n` +
                          `📄 *INVOICE:* \`/generate ID\` (Normal PDF)\n` +
@@ -472,6 +466,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                          `📹 *APPT (Tmrw):* \`/at Name, Mobile, Time, Notes\`\n` +
                          `📅 *SLOTS:* \`/slots\` or \`/slots tomorrow\`\n` +
                          `🗑 *CLEAR SLOT:* \`/reschedule Time\`\n\n` +
+                         `💡 *Multiple Photos:* To attach multiple photos, send */photos <num>* first (e.g. */photos 3*), then send the photos and command in any order.\n\n` +
                          `⚠️ *IMPORTANT:* Separate details with a COMMA ( , ) for /repair, /delivery, /order, and /a.`;
 
         // --- HELP HANDLERS ---
@@ -480,25 +475,28 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
 
             if (lowerText.includes('repair')) {
                 const repairHelp = `🛠 *REPAIR Order Format*\n${sepInfo}\n\n` +
-                          `*Command:*\n/repair Name, Mobile, Address, Total, Advance, Karigar, [NumPhotos], Notes\n\n` +
-                          `*Example (1 Photo):*\n/repair Deepa Ben, 9925042620, Ahmedabad, 5000, 1000, Anil, Resize Ring\n` +
-                          `*Example (3 Photos):*\n/repair Deepa Ben, 9925042620, Ahmedabad, 5000, 1000, Anil, 3, Resize Ring`;
+                          `*Command:*\n/repair Name, Mobile, Address, Total, Advance, Karigar, Notes\n\n` +
+                          `*Example:*\n/repair Deepa Ben, 9925042620, Ahmedabad, 5000, 1000, Anil, Resize Ring\n\n` +
+                          `📸 *Multiple Photos:*\n` +
+                          `To attach multiple photos, send */photos 3* (or any count) before completing this command.`;
                 res.set('Content-Type', 'text/xml');
                 return res.send(`<Response><Message>${repairHelp}</Message></Response>`);
             } else if (lowerText.includes('delivery')) {
                 const deliveryHelp = `🚚 *DELIVERY Order Format*\n${sepInfo}\n\n` +
-                          `*Command:*\n/delivery Name, Mobile, Address, Total, Advance, AWB, [NumPhotos], Notes\n\n` +
-                          `*Example (1 Photo):*\n/delivery Priya, 9876543210, 56 Park Ave, 20000, 20000, TRACK123, Ship urgent\n` +
-                          `*Example (2 Photos):*\n/delivery Priya, 9876543210, 56 Park Ave, 20000, 20000, TRACK123, 2, Ship urgent\n\n` +
+                          `*Command:*\n/delivery Name, Mobile, Address, Total, Advance, AWB, Notes\n\n` +
+                          `*Example:*\n/delivery Priya, 9876543210, 56 Park Ave, 20000, 20000, TRACK123, Ship urgent\n\n` +
                           `📸 *OCR Delivery:*\n` +
-                          `Send a photo (address label, slip, etc.) with the caption */ocrdelivery* to auto-extract details and generate a pre-filled command.`;
+                          `Send a photo (address label, slip, etc.) with the caption */ocrdelivery* to auto-extract details.\n\n` +
+                          `📸 *Multiple Photos:*\n` +
+                          `To attach multiple photos, send */photos 2* (or any count) before completing this command.`;
                 res.set('Content-Type', 'text/xml');
                 return res.send(`<Response><Message>${deliveryHelp}</Message></Response>`);
             } else if (lowerText.includes('order')) {
                 const orderHelp = `📝 *ORDER Format*\n${sepInfo}\n\n` +
-                          `*Command:*\n/order Name, Mobile, Address, Total, Advance, [NumPhotos], Notes\n\n` +
-                          `*Example (1 Photo):*\n/order Deepa Ben, 9925042620, Ahmedabad, 5000, 1000, Custom Ring\n` +
-                          `*Example (3 Photos):*\n/order Deepa Ben, 9925042620, Ahmedabad, 5000, 1000, 3, Custom Ring`;
+                          `*Command:*\n/order Name, Mobile, Address, Total, Advance, Notes\n\n` +
+                          `*Example:*\n/order Deepa Ben, 9925042620, Ahmedabad, 5000, 1000, Custom Ring\n\n` +
+                          `📸 *Multiple Photos:*\n` +
+                          `To attach multiple photos, send */photos 3* (or any count) before completing this command.`;
                 res.set('Content-Type', 'text/xml');
                 return res.send(`<Response><Message>${orderHelp}</Message></Response>`);
             } else if (lowerText.includes('ocr') || lowerText.includes('ocrdelivery')) {
@@ -732,49 +730,124 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
         if (lowerText.startsWith('/order')) commandType = 'Order';
         else if (lowerText.startsWith('/repair')) commandType = 'Repair';
         else if (lowerText.startsWith('/delivery')) commandType = 'Delivery';
+        else if (lowerText.startsWith('/photos')) commandType = 'Photos';
         else if (lowerText.startsWith('/at ') || lowerText === '/at') {
             commandType = 'Appointment';
             req.isTomorrow = true;
         }
         else if (lowerText.startsWith('/a ') || lowerText === '/a' || lowerText.startsWith('/appointment') || lowerText.startsWith('/vc')) commandType = 'Appointment';
 
+        if (commandType === 'Photos') {
+            const numStr = text.replace(/^\/photos\s*/i, '').trim();
+            const N = parseInt(numStr);
+            if (isNaN(N) || N < 1 || N > 10) {
+                return sendTwiML(res, `❌ Invalid number of photos. Please specify a number between 1 and 10 (e.g., */photos 3*).`);
+            }
+
+            // Clear any existing session
+            const existing = pendingPhotosSession.get(From);
+            if (existing && existing.timer) {
+                clearTimeout(existing.timer);
+            }
+
+            const session = {
+                expectedPhotos: N,
+                mediaUrls: [],
+                command: null
+            };
+
+            session.timer = setTimeout(() => {
+                log(`[PHOTOS-SESSION] Timeout reached for ${From}.`);
+                pendingPhotosSession.delete(From);
+                sendWhatsApp(From, `⚠️ Multi-photo session timed out. Please start again with /photos <num>.`);
+            }, 120000); // 2 minutes
+
+            pendingPhotosSession.set(From, session);
+
+            // Handle initial photo if attached to the command message
+            if (MediaUrl0) {
+                try {
+                    const { buffer, contentType } = await downloadMedia(MediaUrl0);
+                    let ext = 'jpg';
+                    if (contentType === 'image/png') ext = 'png';
+                    const filename = `orders/whatsapp_${Date.now()}_0.${ext}`;
+                    await s3.send(new PutObjectCommand({
+                        Bucket: bucket, Key: filename, Body: buffer, ACL: "public-read", ContentType: contentType
+                    }));
+                    const photoUrl = `https://${bucket}.s3.${region}.amazonaws.com/${filename}`;
+                    session.mediaUrls.push(photoUrl);
+                } catch (err) {
+                    logError('[PHOTOS-SESSION] Error uploading initial photo:', err);
+                }
+            }
+
+            const received = session.mediaUrls.length;
+            const pending = N - received;
+            let replyText = `⏳ Got it. Expecting ${N} photos. `;
+            if (received > 0) {
+                replyText += `Received ${received}, pending ${pending}. Please send the remaining photos.`;
+            } else {
+                replyText += `Please send the photos now.`;
+            }
+            return sendTwiML(res, replyText);
+        }
+
         if (!commandType) {
-            // Check if this sender has a pending media group
-            const pendingGroup = pendingMediaGroups.get(From);
-            if (pendingGroup && MediaUrl0) {
+            // Check if this sender has a pending photos session
+            const session = pendingPhotosSession.get(From);
+            if (session && MediaUrl0) {
                 try {
                     // Download and upload this photo to S3
                     const { buffer, contentType } = await downloadMedia(MediaUrl0);
                     let ext = 'jpg';
                     if (contentType === 'image/png') ext = 'png';
-                    const filename = `orders/whatsapp_${Date.now()}_${pendingGroup.mediaUrls.length}.${ext}`;
+                    const filename = `orders/whatsapp_${Date.now()}_${session.mediaUrls.length}.${ext}`;
                     await s3.send(new PutObjectCommand({
                         Bucket: bucket, Key: filename, Body: buffer, ACL: "public-read", ContentType: contentType
                     }));
                     const photoUrl = `https://${bucket}.s3.${region}.amazonaws.com/${filename}`;
                     
-                    pendingGroup.mediaUrls.push(photoUrl);
-                    log(`[MEDIA-GROUP] Collected photo ${pendingGroup.mediaUrls.length}/${pendingGroup.expectedPhotos} for ${From}`);
+                    session.mediaUrls.push(photoUrl);
+                    log(`[PHOTOS-SESSION] Collected photo ${session.mediaUrls.length}/${session.expectedPhotos} for ${From}`);
 
                     // Reset fallback timer
-                    clearTimeout(pendingGroup.timer);
+                    clearTimeout(session.timer);
 
-                    if (pendingGroup.mediaUrls.length >= pendingGroup.expectedPhotos) {
-                        log(`[MEDIA-GROUP] All ${pendingGroup.expectedPhotos} photos collected. Finalizing...`);
-                        setTimeout(() => finalizeMediaGroupOrder(From, db, s3, bucket, region), 0);
+                    const received = session.mediaUrls.length;
+                    const pending = session.expectedPhotos - received;
+
+                    if (pending === 0) {
+                        if (session.command) {
+                            log(`[PHOTOS-SESSION] All photos collected and command exists. Executing...`);
+                            pendingPhotosSession.delete(From);
+                            setTimeout(() => executeSessionOrder(From, session, db, s3, bucket, region), 0);
+                            
+                            res.set('Content-Type', 'text/xml');
+                            return res.send('<Response></Response>');
+                        } else {
+                            // Photos complete but command is still pending
+                            session.timer = setTimeout(() => {
+                                log(`[PHOTOS-SESSION] Timeout reached for ${From} waiting for command.`);
+                                pendingPhotosSession.delete(From);
+                                sendWhatsApp(From, `⚠️ Multi-photo session timed out waiting for command. Please try again.`);
+                            }, 120000);
+
+                            res.set('Content-Type', 'text/xml');
+                            return res.send(`<Response><Message>Received ${received}, pending command.</Message></Response>`);
+                        }
                     } else {
-                        // Reset timer with 20s fallback
-                        pendingGroup.timer = setTimeout(() => {
-                            log(`[MEDIA-GROUP] Timeout reached. Finalizing with ${pendingGroup.mediaUrls.length} photos...`);
-                            finalizeMediaGroupOrder(From, db, s3, bucket, region);
-                        }, 20000);
-                    }
+                        // Reset timer with 2 mins fallback
+                        session.timer = setTimeout(() => {
+                            log(`[PHOTOS-SESSION] Timeout reached for ${From} waiting for remaining photos.`);
+                            pendingPhotosSession.delete(From);
+                            sendWhatsApp(From, `⚠️ Multi-photo session timed out. Please try again.`);
+                        }, 120000);
 
-                    // Respond immediately with empty TwiML so Twilio doesn't reply or show warning
-                    res.set('Content-Type', 'text/xml');
-                    return res.send('<Response></Response>');
+                        res.set('Content-Type', 'text/xml');
+                        return res.send(`<Response><Message>Received ${received}, pending ${pending}.</Message></Response>`);
+                    }
                 } catch (err) {
-                    logError('[MEDIA-GROUP] Error handling extra photo:', err);
+                    logError('[PHOTOS-SESSION] Error handling photo:', err);
                     res.set('Content-Type', 'text/xml');
                     return res.send('<Response></Response>');
                 }
@@ -833,29 +906,14 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
         let notes = '';
         let appointmentDate = today;
         let appointmentTime = '';
-        let expectedPhotos = 1;
 
         // Specific Fields
         if (commandType === 'Repair') {
             karigarName = args[5] || '';
-            const parsedPhotos = parseInt(args[6]);
-            if (!isNaN(parsedPhotos) && parsedPhotos > 0) {
-                expectedPhotos = parsedPhotos;
-                notes = args.slice(7).join(', ');
-            } else {
-                expectedPhotos = 1;
-                notes = args.slice(6).join(', ');
-            }
+            notes = args.slice(6).join(', ');
         } else if (commandType === 'Delivery') {
             trackingNumber = args[5] || '';
-            const parsedPhotos = parseInt(args[6]);
-            if (!isNaN(parsedPhotos) && parsedPhotos > 0) {
-                expectedPhotos = parsedPhotos;
-                notes = args.slice(7).join(', ');
-            } else {
-                expectedPhotos = 1;
-                notes = args.slice(6).join(', ');
-            }
+            notes = args.slice(6).join(', ');
         } else if (commandType === 'Appointment') {
             // Format: /a Name, Mobile, Time, Notes, Date
             const aName = args[0] || 'Unknown';
@@ -922,103 +980,65 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
             
             req.slotIndex = slotIdx; // Pass to insert
         } else {
-            // Order
-            const parsedPhotos = parseInt(args[5]);
-            if (!isNaN(parsedPhotos) && parsedPhotos > 0) {
-                expectedPhotos = parsedPhotos;
-                notes = args.slice(6).join(', ');
-            } else {
-                expectedPhotos = 1;
-                notes = args.slice(5).join(', ');
-            }
+            notes = args.slice(5).join(', ');
         }
 
-        // If we expect multiple photos, initialize media buffering and return immediate response.
-        if (expectedPhotos > 1) {
-            // Cancel any existing timer/group for this sender to avoid leaks
-            const existingGroup = pendingMediaGroups.get(From);
-            if (existingGroup && existingGroup.timer) {
-                clearTimeout(existingGroup.timer);
-            }
-
-            const pendingGroup = {
-                firstName,
-                lastName,
-                mobile,
-                address,
-                totalAmount,
-                advancePaid,
-                remainingAmount,
-                commandType,
-                karigarName,
-                trackingNumber,
-                notes,
-                today,
-                expectedPhotos,
-                mediaUrls: []
-            };
-
-            // Start a 25-second fallback timer
-            pendingGroup.timer = setTimeout(() => {
-                log(`[MEDIA-GROUP] Timeout reached for initial command. Finalizing with ${pendingGroup.mediaUrls.length} photos...`);
-                finalizeMediaGroupOrder(From, db, s3, bucket, region);
-            }, 25000);
-
-            pendingMediaGroups.set(From, pendingGroup);
-
-            // Handle the first photo if it was sent with the command
-            if (MediaUrl0) {
-                (async () => {
-                    try {
-                        const { buffer, contentType } = await downloadMedia(MediaUrl0);
-                        let ext = 'jpg';
-                        if (contentType === 'image/png') ext = 'png';
-                        const filename = `orders/whatsapp_${Date.now()}_0.${ext}`;
-                        await s3.send(new PutObjectCommand({
-                            Bucket: bucket, Key: filename, Body: buffer, ACL: "public-read", ContentType: contentType
-                        }));
-                        const photoUrl = `https://${bucket}.s3.${region}.amazonaws.com/${filename}`;
-                        
-                        // Check if the group is still active
-                        const currentGroup = pendingMediaGroups.get(From);
-                        if (currentGroup === pendingGroup) {
-                            currentGroup.mediaUrls.push(photoUrl);
-                            log(`[MEDIA-GROUP] Processed initial command photo (1/${expectedPhotos})`);
-                            if (currentGroup.mediaUrls.length >= expectedPhotos) {
-                                clearTimeout(currentGroup.timer);
-                                finalizeMediaGroupOrder(From, db, s3, bucket, region);
-                            }
-                        }
-                    } catch (err) {
-                        logError('[MEDIA-GROUP] Error uploading initial photo:', err);
-                    }
-                })();
-
-                const replyText = `⏳ Collecting ${expectedPhotos} photos (1/${expectedPhotos} received). Please send the remaining ${expectedPhotos - 1} photos.`;
-                res.set('Content-Type', 'text/xml');
-                return res.send(`<Response><Message>${replyText}</Message></Response>`);
-            } else {
-                const replyText = `⏳ Collecting ${expectedPhotos} photos. Please send the photos now.`;
-                res.set('Content-Type', 'text/xml');
-                return res.send(`<Response><Message>${replyText}</Message></Response>`);
-            }
-        }
-
-        // --- IMAGE HANDLING ---
+        // --- SESSION STATE CHECK ---
+        const session = pendingPhotosSession.get(From);
         let photoUrl = '';
-        if (MediaUrl0) {
-            try {
-                const { buffer, contentType } = await downloadMedia(MediaUrl0);
-                let ext = 'jpg';
-                if (contentType === 'image/png') ext = 'png';
-                
-                const filename = `orders/whatsapp_${Date.now()}.${ext}`;
-                await s3.send(new PutObjectCommand({
-                    Bucket: bucket, Key: filename, Body: buffer, ACL: "public-read", ContentType: contentType
-                }));
-                photoUrl = `https://${bucket}.s3.${region}.amazonaws.com/${filename}`;
-            } catch (err) {
-                logError('[TWILIO] Media upload failed:', err);
+
+        if (session) {
+            clearTimeout(session.timer);
+            const received = session.mediaUrls.length;
+            
+            if (received >= session.expectedPhotos) {
+                // All photos already collected. Proceed with DB insert.
+                pendingPhotosSession.delete(From);
+                photoUrl = session.mediaUrls.join(',');
+            } else {
+                // Command received before photos are complete. Save command to session.
+                session.command = {
+                    commandType,
+                    firstName,
+                    lastName,
+                    mobile,
+                    address,
+                    totalAmount,
+                    advancePaid,
+                    remainingAmount,
+                    karigarName,
+                    trackingNumber,
+                    notes,
+                    today
+                };
+
+                // Reset timer for 2 minutes
+                session.timer = setTimeout(() => {
+                    log(`[PHOTOS-SESSION] Timeout reached for ${From} waiting for remaining photos.`);
+                    pendingPhotosSession.delete(From);
+                    sendWhatsApp(From, `⚠️ Multi-photo session timed out. Please try again.`);
+                }, 120000);
+
+                const pending = session.expectedPhotos - received;
+                const replyText = `⏳ Command saved. Received ${received} of ${session.expectedPhotos} photos. Please send the remaining ${pending} photos.`;
+                res.set('Content-Type', 'text/xml');
+                return res.send(`<Response><Message>${replyText}</Message></Response>`);
+            }
+        } else {
+            // Normal 1-photo or no-photo flow
+            if (MediaUrl0) {
+                try {
+                    const { buffer, contentType } = await downloadMedia(MediaUrl0);
+                    let ext = 'jpg';
+                    if (contentType === 'image/png') ext = 'png';
+                    const filename = `orders/whatsapp_${Date.now()}.${ext}`;
+                    await s3.send(new PutObjectCommand({
+                        Bucket: bucket, Key: filename, Body: buffer, ACL: "public-read", ContentType: contentType
+                    }));
+                    photoUrl = `https://${bucket}.s3.${region}.amazonaws.com/${filename}`;
+                } catch (err) {
+                    logError('[TWILIO] Media upload failed:', err);
+                }
             }
         }
 
