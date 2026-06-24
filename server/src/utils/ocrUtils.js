@@ -42,7 +42,7 @@ export async function extractDeliveryDetailsFromImage(buffer, contentType) {
             }
 
             const base64Image = buffer.toString('base64');
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`;
 
             const prompt = `Extract delivery details from this shipping label, receipt, handwritten address slip, or order image.
 Return a JSON object with the following fields:
