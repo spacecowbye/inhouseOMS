@@ -370,7 +370,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
         }
 
         // --- POLKI INVENTORY INGEST BRANCH ---
-        if (lowerText.includes('polki') && MediaUrl0) {
+        if (lowerText.startsWith('/polki') && MediaUrl0) {
             try {
                 // 1. Parse category
                 let category = 'neckpiece'; // default
