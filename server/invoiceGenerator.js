@@ -97,15 +97,23 @@ export async function generateInvoiceBuffer(order) {
             doc.font('Helvetica').fontSize(10);
             doc.text('1', 50, rowY, { width: 30, align: 'center' });
 
-            if (order.photoUrl) {
-                try {
-                    const imgResp = await fetch(order.photoUrl);
-                    if (imgResp.ok) {
-                        const imgBuffer = await imgResp.arrayBuffer();
-                        doc.image(Buffer.from(imgBuffer), 100, rowY, { fit: [100, 100], align: 'center' });
+            const urls = order.photoUrl ? order.photoUrl.split(',').map(u => u.trim()).filter(Boolean) : [];
+            const rowHeight = Math.max(120, urls.length * 110);
+
+            if (urls.length > 0) {
+                for (let i = 0; i < urls.length; i++) {
+                    const imgUrl = urls[i];
+                    try {
+                        const imgResp = await fetch(imgUrl);
+                        if (imgResp.ok) {
+                            const imgBuffer = await imgResp.arrayBuffer();
+                            doc.image(Buffer.from(imgBuffer), 100, rowY + (i * 110), { fit: [100, 100], align: 'center' });
+                        } else {
+                            doc.text(`[Image ${i + 1} Error]`, 90, rowY + (i * 110), { width: 120, align: 'center' });
+                        }
+                    } catch (e) {
+                        doc.text(`[Image ${i + 1} Error]`, 90, rowY + (i * 110), { width: 120, align: 'center' });
                     }
-                } catch (e) {
-                    doc.text('[Image Error]', 90, rowY, { width: 120, align: 'center' });
                 }
             } else {
                  doc.text('[No Image]', 90, rowY, { width: 120, align: 'center' });
@@ -113,8 +121,6 @@ export async function generateInvoiceBuffer(order) {
 
             doc.text(order.notes || 'Repair Work', 220, rowY, { width: 220 });
             doc.text(formatDisp(order.totalAmount), 450, rowY, { width: 90, align: 'right' });
-
-            const rowHeight = 120;
             const totalRowY = rowY + rowHeight;
             doc.moveTo(50, totalRowY).lineTo(545, totalRowY).strokeColor('#cccccc').stroke();
 

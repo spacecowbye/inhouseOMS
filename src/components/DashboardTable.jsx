@@ -8,8 +8,10 @@ import {
   ArrowDown,
   X,
   FileText,
-  MessageCircle
+  MessageCircle,
+  Images
 } from "lucide-react";
+import Gallery from "./Gallery";
 import {
   extractCity,
   getStatusColor,
@@ -344,14 +346,25 @@ const DashboardTable = ({
                       {/* PHOTO */}
                       <td className="px-4 py-4 whitespace-nowrap">
                         {order.photoUrl ? (
-                          <img
-                            src={order.photoUrl}
-                            alt="Jewelry"
-                            onClick={() =>
-                              setSelectedImage(order.photoUrl)
-                            }
-                            className="w-10 h-10 object-cover rounded-lg border border-gray-200 cursor-pointer hover:opacity-80 transition"
-                          />
+                          order.photoUrl.includes(',') ? (
+                            <div
+                              onClick={() => setSelectedImage(order.photoUrl)}
+                              className="relative w-10 h-10 bg-gradient-to-tr from-amber-500 to-yellow-400 rounded-lg flex items-center justify-center cursor-pointer hover:opacity-90 hover:scale-105 active:scale-95 transition-all shadow-md group border border-amber-300"
+                              title={`${order.photoUrl.split(',').filter(Boolean).length} photos attached`}
+                            >
+                              <Images size={18} className="text-white group-hover:scale-110 transition-transform duration-200" />
+                              <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full border border-white shadow-sm">
+                                {order.photoUrl.split(',').filter(Boolean).length}
+                              </span>
+                            </div>
+                          ) : (
+                            <img
+                              src={order.photoUrl}
+                              alt="Jewelry"
+                              onClick={() => setSelectedImage(order.photoUrl)}
+                              className="w-10 h-10 object-cover rounded-lg border border-gray-200 cursor-pointer hover:opacity-80 transition hover:scale-105 active:scale-95"
+                            />
+                          )
                         ) : (
                           <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center">
                             <Package
@@ -588,16 +601,20 @@ const DashboardTable = ({
             >
               <button
                 onClick={() => setSelectedImage(null)}
-                className="absolute -top-3 -right-3 bg-white rounded-full p-1 shadow hover:bg-gray-100"
+                className="absolute -top-3 -right-3 bg-white rounded-full p-1 shadow hover:bg-gray-100 z-20"
               >
                 <X size={20} />
               </button>
 
-              <img
-                src={selectedImage}
-                alt="Full view"
-                className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-xl"
-              />
+              {selectedImage.includes(',') ? (
+                <Gallery images={selectedImage.split(',').filter(Boolean)} />
+              ) : (
+                <img
+                  src={selectedImage}
+                  alt="Full view"
+                  className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-xl"
+                />
+              )}
             </div>
           </div>
         )}
