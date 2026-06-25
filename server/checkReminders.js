@@ -1,5 +1,6 @@
 import sqlite3 from 'sqlite3';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import { sendWhatsApp, timeToSlotIndex } from './whatsappBot.js';
@@ -37,8 +38,102 @@ function normalizeMobile(mobile) {
     return clean;
 }
 
+function formatDateDDMMYYYY(dateStr) {
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+        return `${parts[2]}-${parts[1]}-${parts[0]}`;
+    }
+    return dateStr;
+}
+
+async function checkDailyDigest(todayStr) {
+    try {
+        const kolkataHourStr = new Intl.DateTimeFormat('en-US', {
+            timeZone: 'Asia/Kolkata',
+            hour: 'numeric',
+            hour12: false
+        }).format(new Date(Date.now()));
+        const currentHour = parseInt(kolkataHourStr, 10);
+
+        log(`Evaluated current hour in Kolkata: ${currentHour}`);
+
+        // Only send if it's the 8:00 AM hour (8:00 - 8:59)
+        if (currentHour !== 8) {
+            return;
+        }
+
+        const statePath = path.join(__dirname, 'data', 'digest_state.json');
+        let state = { lastSentDate: "" };
+
+        if (fs.existsSync(statePath)) {
+            try {
+                state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+            } catch (parseErr) {
+                logError("Failed to parse digest_state.json:", parseErr.message);
+            }
+        }
+
+        if (state.lastSentDate === todayStr) {
+            // Already sent today
+            return;
+        }
+
+        log(`Current time is in 8 AM hour. Sending daily digest for ${todayStr}...`);
+
+        // Query today's appointments
+        const sql = `SELECT * FROM appointments WHERE date = ? ORDER BY time ASC`;
+        const rows = await new Promise((resolve, reject) => {
+            db.all(sql, [todayStr], (err, result) => {
+                if (err) reject(err);
+                else resolve(result);
+            });
+        });
+
+        const displayDate = formatDateDDMMYYYY(todayStr);
+        let body = `☀️ *Today's Video Call Appointments*\n📅 Date: *${displayDate}*\n`;
+        
+        if (rows.length > 0) {
+            body += `Total Scheduled: *${rows.length}*\n\n`;
+            rows.forEach((row, index) => {
+                const customerName = `${row.firstName} ${row.lastName || ''}`.trim();
+                body += `${index + 1}️⃣ *${customerName}*\n`;
+                body += `🕒 Time: *${row.time}*\n`;
+                body += `📞 Mobile: ${row.mobile}\n`;
+                body += `💍 Notes: ${row.notes || '—'}\n\n`;
+            });
+        } else {
+            body += `\nNo video call appointments scheduled for today! Have a wonderful day ahead! 🌸`;
+        }
+
+        // Send to admin numbers
+        const targets = new Set();
+        if (process.env.ADMIN_NUMBERS) {
+            process.env.ADMIN_NUMBERS.split(',').forEach(num => {
+                const trimmed = num.trim();
+                if (trimmed) targets.add(trimmed);
+            });
+        }
+        if (targets.size === 0) {
+            targets.add('whatsapp:+917874847466');
+        }
+
+        for (const target of targets) {
+            log(`Sending daily digest to admin: ${target}`);
+            await sendWhatsApp(target, body);
+        }
+
+        // Save state
+        state.lastSentDate = todayStr;
+        fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+        log(`Daily digest state saved for date ${todayStr}.`);
+
+    } catch (digestErr) {
+        logError("Error in daily digest execution:", digestErr.message);
+    }
+}
+
 async function run() {
-    log('Checking for upcoming appointment reminders...');
+    log('Checking for daily digest and upcoming appointment reminders...');
 
     // 1. Get today's and tomorrow's date strings in Asia/Kolkata timezone
     const getKolkataDate = (offsetDays = 0) => {
@@ -48,6 +143,9 @@ async function run() {
 
     const todayStr = getKolkataDate(0);
     const tomorrowStr = getKolkataDate(1);
+
+    // 2. Daily digest check
+    await checkDailyDigest(todayStr);
 
     log(`Querying appointments for dates: ${todayStr}, ${tomorrowStr}`);
 
