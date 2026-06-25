@@ -16,8 +16,6 @@ const WORK_START_HOUR = 11;
 const WORK_END_HOUR = 20; // 8 PM
 const SLOT_MINUTES = 30;
 
-// Store active reminder timers in memory
-const reminderTimers = new Map();
 const pendingPhotosSession = new Map();
 
 async function executeSessionOrder(senderKey, session, db, s3, bucket, region) {
@@ -118,7 +116,7 @@ function sendTwiML(res, body, mediaUrl = null) {
 }
 
 // Convert time string → slotIndex (24-hour format: HH:MM)
-function timeToSlotIndex(timeStr) {
+export function timeToSlotIndex(timeStr) {
     const match = timeStr.match(/^(\d{1,2})(?::(\d{2}))?$/);
     if (!match) return null;
     
@@ -168,95 +166,6 @@ export const sendWhatsApp = async (to, body, mediaUrl = null) => {
     } catch (err) {
         logError(`[OUTBOUND] Error sending to ${to}:`, err.message);
     }
-};
-
-function scheduleReminder({
-    appointmentId,
-    appointmentDate,
-    slotIndex,
-    customerName,
-    customerMobile,
-    notes,
-    notifyNumbers
-}) {
-    if (slotIndex === null || slotIndex === undefined) return;
-    
-    const slotStartMinutes = slotIndex * SLOT_MINUTES;
-    const hour = WORK_START_HOUR + Math.floor(slotStartMinutes / 60);
-    const minute = slotStartMinutes % 60;
-
-    const hourStr = hour.toString().padStart(2, '0');
-    const minStr = minute.toString().padStart(2, '0');
-    
-    // Force IST (+05:30) regardless of server local time
-    const appointmentTime = new Date(`${appointmentDate}T${hourStr}:${minStr}:00+05:30`);
-    const reminderTime = new Date(appointmentTime.getTime() - 10 * 60 * 1000); // 10 mins before
-
-    const delay = reminderTime.getTime() - Date.now();
-
-    // Cancel existing if any
-    if (reminderTimers.has(appointmentId)) {
-        clearTimeout(reminderTimers.get(appointmentId));
-    }
-
-    if (delay < - (30 * 60 * 1000)) {
-        log(`[REMINDER] Appointment ID ${appointmentId} is too far in the past. Skipping.`);
-        return;
-    }
-
-    const timer = setTimeout(() => {
-        const slotTimeDisplay = slotIndexToTime(slotIndex);
-        const cleanMobile = normalizeMobile(customerMobile);
-
-        const customerMsg =
-            `Hi ${customerName}, this is a reminder about your video appointment ` +
-            `at Deepa’s Customized Silver Jewellery. We’ll be connecting shortly.`;
-
-        const waLink = `https://wa.me/${cleanMobile}?text=${encodeURIComponent(customerMsg)}`;
-
-        const body =
-            `⏰ *Video Call Reminder (10 mins)*\n\n` +
-            `👤 ${customerName}\n` +
-            `📞 ${customerMobile}\n` +
-            `🕒 ${slotTimeDisplay}\n` +
-            `💍 ${notes || '—'}\n\n` +
-            `👉 Message customer:\n${waLink}`;
-
-        notifyNumbers.forEach(num => {
-            sendWhatsApp(num, body);
-        });
-
-        reminderTimers.delete(appointmentId);
-        log('[REMINDER] Sent for appointment', appointmentId);
-    }, Math.max(delay, 0));
-
-    reminderTimers.set(appointmentId, timer);
-    log(`[REMINDER] Scheduled for ID ${appointmentId} in ${Math.round(Math.max(delay, 0) / 1000 / 60)} mins`);
-}
-
-export const initReminders = (db) => {
-    const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(tomorrow);
-
-    log('[REMINDER] Initializing reminders from DB...');
-    db.all("SELECT * FROM appointments WHERE date IN (?, ?) AND slotIndex IS NOT NULL", [todayStr, tomorrowStr], (err, rows) => {
-        if (err) return logError('[REMINDER] DB Error:', err);
-        rows.forEach(row => {
-            if (row.creatorNumber) {
-                scheduleReminder({
-                    appointmentId: row.id,
-                    appointmentDate: row.date,
-                    slotIndex: row.slotIndex,
-                    customerName: `${row.firstName} ${row.lastName}`,
-                    customerMobile: row.mobile,
-                    notes: row.notes,
-                    notifyNumbers: [row.creatorNumber]
-                });
-            }
-        });
-    });
 };
 
 // Helper to download media
@@ -1103,18 +1012,6 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                     `📱 ${mobile}\n` +
                     `📅 Date: ${appointmentDate}\n` +
                     `⏰ Time: ${appointmentTime}`;
-
-                // Schedule Reminder (notify the person who sent the message)
-                scheduleReminder({
-                    appointmentId: this.lastID,
-                    appointmentDate: appointmentDate,
-                    slotIndex: slotIdx,
-                    customerName: `${firstName} ${lastName}`,
-                    customerMobile: mobile,
-                    notes: notes,
-                    notifyNumbers: [From],
-                    sendWhatsApp: sendWhatsApp
-                });
 
                 res.set('Content-Type', 'text/xml');
                 res.send(`<Response><Message>${responseText}</Message></Response>`);

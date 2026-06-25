@@ -15,7 +15,7 @@ const __dirname = dirname(__filename)
 
 const sqlite = sqlite3.verbose();
 const app = express();
-import { handleTwilioMessage, initReminders, sendWhatsApp } from "./whatsappBot.js" 
+import { handleTwilioMessage, sendWhatsApp, timeToSlotIndex } from "./whatsappBot.js" 
 import { generateInvoiceBuffer } from "./invoiceGenerator.js"
 import createInventoryRouter from "./src/routes/inventory.js"
 const PORT = 3001;
@@ -214,6 +214,7 @@ const db = new sqlite.Database(dbPath, (err) => {
                     // Ensure columns exist
                     db.run("ALTER TABLE appointments ADD COLUMN slotIndex INTEGER", () => {});
                     db.run("ALTER TABLE appointments ADD COLUMN creatorNumber TEXT", () => {});
+                    db.run("ALTER TABLE appointments ADD COLUMN reminderSent INTEGER DEFAULT 0", () => {});
                 }
             });
 
@@ -712,8 +713,9 @@ app.get('/api/appointments', (req, res) => {
 
 app.post('/api/appointments', (req, res) => {
     const { firstName, lastName, mobile, date, time, notes } = req.body;
-    const sql = `INSERT INTO appointments (firstName, lastName, mobile, date, time, notes) VALUES (?, ?, ?, ?, ?, ?)`;
-    db.run(sql, [firstName, lastName, mobile, date, time, notes], function(err) {
+    const slotIndex = timeToSlotIndex(time);
+    const sql = `INSERT INTO appointments (firstName, lastName, mobile, date, time, slotIndex, notes) VALUES (?, ?, ?, ?, ?, ?, ?)`;
+    db.run(sql, [firstName, lastName, mobile, date, time, slotIndex, notes], function(err) {
         if (err) return handleServerError(res, err, "Failed to create appointment");
         res.json({ status: "success", id: this.lastID });
     });
@@ -731,7 +733,4 @@ app.delete('/api/appointments/:id', (req, res) => {
 app.listen(PORT, () => {
     log(`[INFO] Server running on http://localhost:${PORT}`);
     log(`[INFO] API available at http://localhost:${PORT}/api/orders`);
-    
-    // Initialize reminders for upcoming appointments
-    initReminders(db);
 });
