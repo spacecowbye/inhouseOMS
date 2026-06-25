@@ -434,8 +434,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                           `*Example:*\n/repair Deepa Ben, 9925042620, Ahmedabad, 5000, 1000, Anil, Resize Ring\n\n` +
                           `📸 *Multiple Photos:*\n` +
                           `To attach multiple photos, send */photos 3* (or any count) before completing this command.`;
-                res.set('Content-Type', 'text/xml');
-                return res.send(`<Response><Message>${repairHelp}</Message></Response>`);
+                return sendTwiML(res, repairHelp);
             } else if (lowerText.includes('delivery')) {
                 const deliveryHelp = `🚚 *DELIVERY Order Format*\n${sepInfo}\n\n` +
                           `*Command:*\n/delivery Name, Mobile, Address, Total, Advance, AWB, Notes\n\n` +
@@ -444,34 +443,29 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                           `Send a photo (address label, slip, etc.) with the caption */ocrdelivery* to auto-extract details.\n\n` +
                           `📸 *Multiple Photos:*\n` +
                           `To attach multiple photos, send */photos 2* (or any count) before completing this command.`;
-                res.set('Content-Type', 'text/xml');
-                return res.send(`<Response><Message>${deliveryHelp}</Message></Response>`);
+                return sendTwiML(res, deliveryHelp);
             } else if (lowerText.includes('order')) {
                 const orderHelp = `📝 *ORDER Format*\n${sepInfo}\n\n` +
                           `*Command:*\n/order Name, Mobile, Address, Total, Advance, Notes\n\n` +
                           `*Example:*\n/order Deepa Ben, 9925042620, Ahmedabad, 5000, 1000, Custom Ring\n\n` +
                           `📸 *Multiple Photos:*\n` +
                           `To attach multiple photos, send */photos 3* (or any count) before completing this command.`;
-                res.set('Content-Type', 'text/xml');
-                return res.send(`<Response><Message>${orderHelp}</Message></Response>`);
+                return sendTwiML(res, orderHelp);
             } else if (lowerText.includes('ocr') || lowerText.includes('ocrdelivery')) {
                 const ocrHelp = `📸 *OCR DELIVERY Command*\n\n` +
                           `To auto-generate a pre-filled delivery entry:\n` +
                           `1. Send an image (shipping label, written slip, or receipt) on WhatsApp.\n` +
                           `2. Set the caption of the photo to */ocrdelivery*.\n` +
                           `3. The bot will reply with the extracted details and a separate copy-pasteable /delivery command.`;
-                res.set('Content-Type', 'text/xml');
-                return res.send(`<Response><Message>${ocrHelp}</Message></Response>`);
+                return sendTwiML(res, ocrHelp);
             } else if (lowerText.includes('appointment')) {
                 const apptHelp = `📹 *VIDEO CALL Appointment*\n${sepInfo}\n\n` +
                           `*Command:*\n/a Name, Mobile, Time, Notes, Date\n\n` +
                           `*Format:* Date (DD-MM) is optional. Time is HH:MM (24-hour).\n\n` +
                           `*Example:*\n/a Rahul, 9876543210, 11:30, Show Rings, 18-01`;
-                res.set('Content-Type', 'text/xml');
-                return res.send(`<Response><Message>${apptHelp}</Message></Response>`);
+                return sendTwiML(res, apptHelp);
             } else {
-                res.set('Content-Type', 'text/xml');
-                return res.send(`<Response><Message>${fullHelp}</Message></Response>`);
+                return sendTwiML(res, fullHelp);
             }
         }
 
@@ -809,8 +803,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
             }
 
             // Unknown command - show full help
-            res.set('Content-Type', 'text/xml');
-            return res.send(`<Response><Message>${fullHelp}</Message></Response>`);
+            return sendTwiML(res, fullHelp);
         }
 
         // Remove command keyword (e.g. "/order") and split
