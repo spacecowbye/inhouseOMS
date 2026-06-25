@@ -395,42 +395,100 @@ const trackMahavir = async (awb) => {
             redirect: 'follow'
         });
 
-        const html = await trackRes.text();
+        // 3. Extract docno and Tmp parameters from the redirected URL
+        const finalUrl = trackRes.url;
+        const docnosMatch = finalUrl.match(/[?&]docnos=([^&]+)/);
+        const tmpMatch = finalUrl.match(/[?&]Tmp=([^&]+)/);
 
-        // 3. Extract tables using regex
-        const transitTable = html.match(/<table[^>]*id="ctl00_MainContent_tblTrack"[^>]*>[\s\S]*?<\/table>/i)?.[0];
-        const deliveryTable = html.match(/<table[^>]*id="ctl00_MainContent_tblDelivery"[^>]*>[\s\S]*?<\/table>/i)?.[0];
-        const statusMatch = html.match(/<span id="ctl00_MainContent_lblStatus"[^>]*>([\s\S]*?)<\/span>/i)?.[1];
+        let docno = '';
+        let tmp = '';
+
+        if (docnosMatch) {
+            docno = decodeURIComponent(docnosMatch[1]);
+        }
+        if (tmpMatch) {
+            tmp = tmpMatch[1];
+        }
+
+        // Fallback to parse HTML if the redirect URL doesn't contain query params
+        if (!docno) {
+            const listHtml = await trackRes.text();
+            const iframeMatch = listHtml.match(/src="Frm_DocTrack\.aspx\?docno=([^"&]+)/i);
+            if (iframeMatch) {
+                docno = decodeURIComponent(iframeMatch[1]);
+            }
+            const iframeTmpMatch = listHtml.match(/src="Frm_DocTrack\.aspx\?[^"]*Tmp=([^"&]+)/i);
+            if (iframeTmpMatch) {
+                tmp = iframeTmpMatch[1];
+            }
+        }
+
+        if (!docno) {
+            logError("[MAHAVIR] Could not resolve docno token");
+            return null;
+        }
+
+        // 4. Fetch direct tracking details
+        const cleanTmp = tmp || Math.floor(Math.random() * 1000000);
+        const trackUrl = `https://shreemahavircourier.com/Frm_DocTrack.aspx?docno=${encodeURIComponent(docno)}&Tmp=${cleanTmp}`;
+        
+        const directRes = await fetch(trackUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+        });
+        const html = await directRes.text();
+
+        // 5. Extract tables using regex
+        let transitTable = html.match(/<table[^>]*id="tblTrack"[^>]*>[\s\S]*?<\/table>/i)?.[0];
+        let deliveryTable = html.match(/<table[^>]*id="tblDelivery"[^>]*>[\s\S]*?<\/table>/i)?.[0];
+        const statusMatch = html.match(/<span id="lblStatus"[^>]*>([\s\S]*?)<\/span>/i)?.[1];
         const infoMatch = html.match(/<div class="prod-info white-clr">([\s\S]*?)<\/div>/i)?.[0];
 
         if (!transitTable && !deliveryTable && !statusMatch) return null;
+
+        // Clean tooltips (alt -> title)
+        const cleanAltAttributes = (tableHtml) => {
+            if (!tableHtml) return tableHtml;
+            return tableHtml.replace(/alt="([^"]*)"/gi, (match, p1) => {
+                let cleanText = p1
+                    .replace(/&lt;br\s*\/&gt;|<br\s*\/?>/gi, '\n')
+                    .replace(/&lt;[^&gt;]*&gt;|<[^>]*>/gi, '')
+                    .replace(/&amp;/g, '&');
+                return `title="${cleanText.trim()}"`;
+            });
+        };
+
+        transitTable = cleanAltAttributes(transitTable);
+        deliveryTable = cleanAltAttributes(deliveryTable);
 
         let resultHtml = `
             <div class="mahavir-tracking p-4 bg-white rounded shadow-sm">
                 <div class="flex items-center justify-between mb-4 border-b pb-2">
                     <h3 class="font-bold text-lg text-red-600">Shree Mahavir Courier</h3>
-                    <div class="text-sm font-semibold">${statusMatch || 'Status Unknown'}</div>
+                    <div class="text-sm font-semibold text-gray-800">${statusMatch || 'Status Unknown'}</div>
                 </div>
                 ${infoMatch ? `<div class="mb-4 text-sm text-gray-700 mahavir-info">${infoMatch}</div>` : ''}
                 
-                <h4 class="font-bold text-md mt-4 mb-2">Transit Details</h4>
+                <h4 class="font-bold text-md mt-4 mb-2 text-gray-800">Transit Details</h4>
                 <div class="overflow-x-auto mb-6">
                     ${transitTable || 'No transit records.'}
                 </div>
 
-                <h4 class="font-bold text-md mt-4 mb-2">Delivery Details</h4>
+                <h4 class="font-bold text-md mt-4 mb-2 text-gray-800">Delivery Details</h4>
                 <div class="overflow-x-auto">
                     ${deliveryTable || 'Not delivered yet.'}
                 </div>
 
                 <style>
-                    .mahavir-tracking table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
-                    .mahavir-tracking th { background: #f8f9fa; text-align: left; padding: 10px; border: 1px solid #dee2e6; }
-                    .mahavir-tracking td { padding: 10px; border: 1px solid #dee2e6; }
+                    .mahavir-tracking table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; color: #374151; }
+                    .mahavir-tracking th { background: #f3f4f6; text-align: left; padding: 10px; border: 1px solid #e5e7eb; font-weight: 600; }
+                    .mahavir-tracking td { padding: 10px; border: 1px solid #e5e7eb; }
                     .mahavir-tracking .prod-info ul { list-style: none; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-                    .mahavir-tracking .prod-info li { border-bottom: 1px solid #f0f0f0; padding: 4px 0; }
-                    .mahavir-tracking .title-2 { font-weight: bold; color: #666; margin-right: 5px; }
-                    .mahavir-tracking .theme-clr { color: #d32f2f; }
+                    .mahavir-tracking .prod-info li { border-bottom: 1px solid #f3f4f6; padding: 4px 0; }
+                    .mahavir-tracking .title-2 { font-weight: bold; color: #4b5563; margin-right: 5px; }
+                    .mahavir-tracking .theme-clr { color: #dc2626; }
+                    .mahavir-tracking a { text-decoration: underline dotted; color: #2563eb; cursor: help; }
                 </style>
             </div>
         `;
