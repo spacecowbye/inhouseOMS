@@ -600,12 +600,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
             db.get("SELECT id FROM appointments WHERE date = ? AND slotIndex = ?", [targetDate, slotIdx], (err, row) => {
                 if (err) return res.status(500).send('<Response><Message>❌ DB Error</Message></Response>');
                 
-                if (row) {
-                    if (reminderTimers.has(row.id)) {
-                        clearTimeout(reminderTimers.get(row.id));
-                        reminderTimers.delete(row.id);
-                    }
-                }
+                const appointmentId = row ? row.id : null;
 
                 db.run("DELETE FROM appointments WHERE date = ? AND slotIndex = ?", [targetDate, slotIdx], function(err) {
                     if (err) {
@@ -615,6 +610,10 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                     if (this.changes === 0) {
                         res.set('Content-Type', 'text/xml');
                         return res.send(`<Response><Message>ℹ️ No booking found at ${slotIndexToTimeRange(slotIdx)} for ${dayLabel}.</Message></Response>`);
+                    }
+
+                    if (appointmentId) {
+                        removeReminderForAppointment(db, appointmentId);
                     }
 
                     res.set('Content-Type', 'text/xml');
@@ -1057,7 +1056,19 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                     return res.status(500).send('<Response><Message>❌ Database Error</Message></Response>');
                 }
 
-                const responseText = `✅ *Video Call Set!* (ID: ${this.lastID})\n` +
+                const appointmentId = this.lastID;
+                const appointment = {
+                    id: appointmentId,
+                    firstName, lastName, mobile,
+                    date: appointmentDate,
+                    time: appointmentTime,
+                    slotIndex: slotIdx,
+                    creatorNumber: From,
+                    notes
+                };
+                addReminderForAppointment(db, appointment);
+
+                const responseText = `✅ *Video Call Set!* (ID: ${appointmentId})\n` +
                     `👤 ${firstName} ${lastName}\n` +
                     `📱 ${mobile}\n` +
                     `📅 Date: ${appointmentDate}\n` +
@@ -1165,3 +1176,236 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
         res.status(500).send('<Response><Message>⚠️ System Error: Something went wrong. Please try again.</Message></Response>');
     }
 };
+
+// --- IN-MEMORY TIMEOUT REMINDER MANAGER ---
+const activeReminders = new Map();
+
+export function getAdminNumbers() {
+    const raw = process.env.ADMIN_NUMBERS;
+    if (!raw) return ['whatsapp:+917874847466'];
+    
+    let numbers = [];
+    try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+            numbers = parsed;
+        } else {
+            numbers = [raw];
+        }
+    } catch (e) {
+        numbers = raw.split(',').map(num => num.trim()).filter(Boolean);
+    }
+
+    return numbers.map(num => num.startsWith('whatsapp:') ? num : `whatsapp:${num}`);
+}
+
+function getReminderTimeMs(dateStr, timeStr) {
+    let slotIndex = timeToSlotIndex(timeStr);
+    if (slotIndex === null || slotIndex === undefined) {
+        return null;
+    }
+    const slotStartMinutes = slotIndex * SLOT_MINUTES;
+    const hour = WORK_START_HOUR + Math.floor(slotStartMinutes / 60);
+    const minute = slotStartMinutes % 60;
+
+    const hourStr = hour.toString().padStart(2, '0');
+    const minStr = minute.toString().padStart(2, '0');
+
+    // Parse appointment time forcing IST (+05:30) offset
+    const appointmentTime = new Date(`${dateStr}T${hourStr}:${minStr}:00+05:30`);
+    return appointmentTime.getTime() - 10 * 60 * 1000; // 10 minutes before
+}
+
+async function triggerReminder(db, reminder, appointment) {
+    try {
+        log(`[REMINDER-MANAGER] Triggering reminder for Appointment ID ${appointment.id}...`);
+
+        const slotTimeDisplay = slotIndexToTimeRange(appointment.slotIndex);
+        const cleanMobile = normalizeMobile(appointment.mobile);
+        const customerName = `${appointment.firstName} ${appointment.lastName || ''}`.trim();
+
+        const customerMsg =
+            `Hi ${customerName}, this is a reminder about your video appointment ` +
+            `at Deepa’s Customized Silver Jewellery. We’ll be connecting shortly.`;
+
+        const waLink = `https://wa.me/${cleanMobile}?text=${encodeURIComponent(customerMsg)}`;
+
+        const body =
+            `⏰ *Video Call Reminder (10 mins)*\n\n` +
+            `👤 ${customerName}\n` +
+            `📞 ${appointment.mobile}\n` +
+            `🕒 ${slotTimeDisplay}\n` +
+            `💍 ${appointment.notes || '—'}\n\n` +
+            `👉 Message customer:\n${waLink}`;
+
+        // Determine who to notify
+        const targets = new Set();
+        if (appointment.creatorNumber) {
+            targets.add(appointment.creatorNumber);
+        }
+        
+        getAdminNumbers().forEach(target => targets.add(target));
+
+        // Send WhatsApp messages
+        for (const target of targets) {
+            await sendWhatsApp(target, body);
+        }
+
+        // Update reminder status to 'sent'
+        db.run("UPDATE reminders SET status = 'sent' WHERE id = ?", [reminder.id], (err) => {
+            if (err) logError(`[REMINDER-MANAGER] Failed to update reminder ${reminder.id} to sent:`, err.message);
+        });
+
+        // Also update reminderSent = 1 in appointments table for legacy compatibility
+        db.run("UPDATE appointments SET reminderSent = 1 WHERE id = ?", [appointment.id], (err) => {
+            if (err) logError(`[REMINDER-MANAGER] Failed to update appointments reminderSent for ID ${appointment.id}:`, err.message);
+        });
+
+        log(`[REMINDER-MANAGER] Reminder sent and marked as complete for ID ${appointment.id}.`);
+    } catch (err) {
+        logError(`[REMINDER-MANAGER] Error sending reminder for Appointment ID ${appointment.id}:`, err.message);
+        db.run("UPDATE reminders SET status = 'failed' WHERE id = ?", [reminder.id]);
+    }
+}
+
+export function scheduleReminderTimeout(db, reminder, appointment) {
+    const now = Date.now();
+    const delay = reminder.reminderTime - now;
+
+    // Clear any existing timeout for this appointment to avoid duplicates
+    if (activeReminders.has(appointment.id)) {
+        clearTimeout(activeReminders.get(appointment.id));
+        activeReminders.delete(appointment.id);
+    }
+
+    if (delay <= 0) {
+        // If it's within 30 minutes in the past, trigger it immediately
+        if (delay >= -30 * 60 * 1000) {
+            triggerReminder(db, reminder, appointment);
+        } else {
+            // Mark as expired
+            db.run("UPDATE reminders SET status = 'expired' WHERE id = ?", [reminder.id], (err) => {
+                if (err) logError(`[REMINDER-MANAGER] Failed to set reminder ${reminder.id} status to expired:`, err.message);
+            });
+            db.run("UPDATE appointments SET reminderSent = 2 WHERE id = ?", [appointment.id], (err) => {
+                if (err) logError(`[REMINDER-MANAGER] Failed to set appointments reminderSent to expired for ID ${appointment.id}:`, err.message);
+            });
+        }
+    } else {
+        // Schedule in the future
+        const timeout = setTimeout(() => {
+            triggerReminder(db, reminder, appointment);
+            activeReminders.delete(appointment.id);
+        }, delay);
+        activeReminders.set(appointment.id, timeout);
+        log(`[REMINDER-MANAGER] Scheduled reminder for appointment ID ${appointment.id} in ${Math.round(delay / 1000 / 60)} minutes.`);
+    }
+}
+
+export function addReminderForAppointment(db, appointment) {
+    const reminderTimeMs = getReminderTimeMs(appointment.date, appointment.time);
+    if (!reminderTimeMs) {
+        log(`[REMINDER-MANAGER] Appointment ID ${appointment.id} has invalid time: "${appointment.time}". Not scheduling reminder.`);
+        return;
+    }
+
+    db.run(
+        "INSERT INTO reminders (appointmentId, reminderTime, status) VALUES (?, ?, 'pending')",
+        [appointment.id, reminderTimeMs],
+        function(err) {
+            if (err) {
+                logError(`[REMINDER-MANAGER] Failed to insert reminder for Appointment ID ${appointment.id}:`, err.message);
+                return;
+            }
+            const reminderId = this.lastID;
+            const reminder = {
+                id: reminderId,
+                appointmentId: appointment.id,
+                reminderTime: reminderTimeMs,
+                status: 'pending'
+            };
+            scheduleReminderTimeout(db, reminder, appointment);
+        }
+    );
+}
+
+export function removeReminderForAppointment(db, appointmentId) {
+    // Clear active timeout
+    if (activeReminders.has(appointmentId)) {
+        clearTimeout(activeReminders.get(appointmentId));
+        activeReminders.delete(appointmentId);
+        log(`[REMINDER-MANAGER] Cleared scheduled timeout for Appointment ID ${appointmentId}`);
+    }
+
+    // Update status in DB
+    db.run(
+        "UPDATE reminders SET status = 'cancelled' WHERE appointmentId = ? AND status = 'pending'",
+        [appointmentId],
+        (err) => {
+            if (err) {
+                logError(`[REMINDER-MANAGER] Failed to cancel reminder for Appointment ID ${appointmentId}:`, err.message);
+            } else {
+                log(`[REMINDER-MANAGER] Reminder for Appointment ID ${appointmentId} updated to 'cancelled' in DB.`);
+            }
+        }
+    );
+}
+
+export function initReminders(db) {
+    db.serialize(() => {
+        // Create reminders table if it doesn't exist
+        db.run(`
+            CREATE TABLE IF NOT EXISTS reminders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                appointmentId INTEGER NOT NULL,
+                reminderTime INTEGER NOT NULL,
+                status TEXT DEFAULT 'pending',
+                createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (appointmentId) REFERENCES appointments(id) ON DELETE CASCADE
+            )
+        `, (err) => {
+            if (err) {
+                logError(`[REMINDER-MANAGER] Failed to create reminders table:`, err.message);
+                return;
+            }
+            log(`[REMINDER-MANAGER] Reminders table ready.`);
+
+            // Load all pending reminders
+            db.all(
+                `SELECT r.*, a.firstName, a.lastName, a.mobile, a.date, a.time, a.slotIndex, a.creatorNumber, a.notes 
+                 FROM reminders r 
+                 JOIN appointments a ON r.appointmentId = a.id
+                 WHERE r.status = 'pending'`,
+                [],
+                (err, rows) => {
+                    if (err) {
+                        logError(`[REMINDER-MANAGER] Failed to load pending reminders:`, err.message);
+                        return;
+                    }
+
+                    log(`[REMINDER-MANAGER] Found ${rows.length} pending reminders to load.`);
+                    rows.forEach(row => {
+                        const reminder = {
+                            id: row.id,
+                            appointmentId: row.appointmentId,
+                            reminderTime: row.reminderTime,
+                            status: row.status
+                        };
+                        const appointment = {
+                            id: row.appointmentId,
+                            firstName: row.firstName,
+                            lastName: row.lastName,
+                            mobile: row.mobile,
+                            date: row.date,
+                            time: row.time,
+                            slotIndex: row.slotIndex,
+                            creatorNumber: row.creatorNumber,
+                            notes: row.notes
+                        };
+                        scheduleReminderTimeout(db, reminder, appointment);
+                    });
+                }
+            );
+        });
+    });
+}

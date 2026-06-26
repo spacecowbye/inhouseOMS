@@ -15,7 +15,7 @@ const __dirname = dirname(__filename)
 
 const sqlite = sqlite3.verbose();
 const app = express();
-import { handleTwilioMessage, sendWhatsApp, timeToSlotIndex } from "./whatsappBot.js" 
+import { handleTwilioMessage, sendWhatsApp, timeToSlotIndex, initReminders, addReminderForAppointment, removeReminderForAppointment } from "./whatsappBot.js" 
 import { generateInvoiceBuffer } from "./invoiceGenerator.js"
 import createInventoryRouter from "./src/routes/inventory.js"
 const PORT = 3001;
@@ -244,6 +244,7 @@ const db = new sqlite.Database(dbPath, (err) => {
             });
 
             console.log("[INFO] Orders table ready.");
+            initReminders(db);
         });
     }
 });
@@ -775,13 +776,22 @@ app.post('/api/appointments', (req, res) => {
     const sql = `INSERT INTO appointments (firstName, lastName, mobile, date, time, slotIndex, notes) VALUES (?, ?, ?, ?, ?, ?, ?)`;
     db.run(sql, [firstName, lastName, mobile, date, time, slotIndex, notes], function(err) {
         if (err) return handleServerError(res, err, "Failed to create appointment");
-        res.json({ status: "success", id: this.lastID });
+        const appointmentId = this.lastID;
+        const appointment = {
+            id: appointmentId,
+            firstName, lastName, mobile, date, time, slotIndex, notes,
+            creatorNumber: null
+        };
+        addReminderForAppointment(db, appointment);
+        res.json({ status: "success", id: appointmentId });
     });
 });
 
 app.delete('/api/appointments/:id', (req, res) => {
-    db.run("DELETE FROM appointments WHERE id = ?", [req.params.id], (err) => {
+    const appointmentId = parseInt(req.params.id);
+    db.run("DELETE FROM appointments WHERE id = ?", [appointmentId], (err) => {
         if (err) return handleServerError(res, err, "Failed to delete appointment");
+        removeReminderForAppointment(db, appointmentId);
         res.json({ status: "success" });
     });
 });
