@@ -250,6 +250,21 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                         return;
                     }
 
+                    // Upload the OCR image to S3
+                    let photoUrl = '';
+                    try {
+                        let ext = 'jpg';
+                        if (contentType === 'image/png') ext = 'png';
+                        const filename = `orders/whatsapp_${Date.now()}.${ext}`;
+                        await s3.send(new PutObjectCommand({
+                            Bucket: bucket, Key: filename, Body: buffer, ACL: "public-read", ContentType: contentType
+                        }));
+                        photoUrl = `https://${bucket}.s3.${region}.amazonaws.com/${filename}`;
+                        log(`[OCR DELIVERY] Image successfully uploaded to S3: ${photoUrl}`);
+                    } catch (uploadErr) {
+                        logError('[OCR DELIVERY] Image upload to S3 failed:', uploadErr);
+                    }
+
                     // 3. Clean fields (replace commas with spaces to not break custom command parser)
                     const name = (details.name || '').replace(/,/g, ' ').trim();
                     const mobile = (details.mobile || '').replace(/,/g, ' ').trim();
@@ -296,24 +311,56 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                         warningText = `\n⚠️ *CRITICAL VERIFICATION WARNINGS:*\n` + warnings.map(w => `- ${w}`).join('\n') + `\n`;
                     }
 
-                    // 4. Construct copy-pasteable command
-                    // Format: /delivery Name, Mobile, Address, Total, Advance, AWB, Notes
-                    const generatedCommand = `/delivery ${name || 'Name'}, ${mobile || 'Mobile'}, ${address || 'Address'}, ${total}, ${advance}, ${awb}, ${notes}`;
+                    // Insert into DB immediately
+                    const rawName = name || 'Unknown';
+                    const nameParts = rawName.split(' ');
+                    const firstName = nameParts[0];
+                    const lastName = nameParts.slice(1).join(' ') || '';
+                    const remainingAmount = (total === -1 || advance === -1) ? -1 : (total - advance);
 
-                    const responseMessage = `🤖 *OCR Delivery Details Extracted*\n\n` +
-                        `👤 *Name:* ${name || '—'}\n` +
-                        `📞 *Mobile:* ${mobile || '—'}${mobileDigits.length < 10 ? ' (⚠️ check)' : ''}\n` +
-                        `📍 *Address:* ${address || '—'}\n` +
-                        `💰 *Total:* ₹${total.toLocaleString('en-IN')}\n` +
-                        `💵 *Advance:* ₹${advance.toLocaleString('en-IN')}\n` +
-                        `📦 *AWB:* ${awb || '—'}${!awb ? ' (⚠️ check)' : ''}\n` +
-                        `📝 *Notes:* ${notes || '—'}\n` +
-                        warningText + `\n` +
-                        `📋 _The copy-pasteable command has been sent in the next message._`;
+                    const sql = `
+                        INSERT INTO orders (
+                            firstName, lastName, mobile, address, 
+                            totalAmount, advancePaid, remainingAmount, 
+                            type, karigarName, trackingNumber, notes, 
+                            photoUrl, orderReceivedDate, shippingDate
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    `;
+                    const values = [
+                        firstName, lastName, mobile, address,
+                        total, advance, remainingAmount,
+                        'Delivery', '', awb, notes,
+                        photoUrl, today, today
+                    ];
 
-                    // Send summary card & copy-pasteable command as two separate outbound WhatsApp messages
-                    await sendWhatsApp(From, responseMessage);
-                    await sendWhatsApp(From, generatedCommand);
+                    db.run(sql, values, async function(err) {
+                        if (err) {
+                            logError('[OCR DELIVERY] DB Insert Error:', err);
+                            await sendWhatsApp(From, '❌ OCR extracted details but failed to save to database. Please try manually.');
+                            return;
+                        }
+
+                        const orderId = this.lastID;
+
+                        // 4. Construct copy-pasteable command
+                        // Format: /delivery ID, Name, Mobile, Address, Total, Advance, AWB, Notes
+                        const generatedCommand = `/delivery ${orderId}, ${name || 'Name'}, ${mobile || 'Mobile'}, ${address || 'Address'}, ${total}, ${advance}, ${awb}, ${notes}`;
+
+                        const responseMessage = `🤖 *OCR Delivery Created!* (ID: ${orderId})\n\n` +
+                            `👤 *Name:* ${name || '—'}\n` +
+                            `📞 *Mobile:* ${mobile || '—'}${mobileDigits.length < 10 ? ' (⚠️ check)' : ''}\n` +
+                            `📍 *Address:* ${address || '—'}\n` +
+                            `💰 *Total:* ₹${total.toLocaleString('en-IN')}\n` +
+                            `💵 *Advance:* ₹${advance.toLocaleString('en-IN')}\n` +
+                            `📦 *AWB:* ${awb || '—'}${!awb ? ' (⚠️ check)' : ''}\n` +
+                            `📝 *Notes:* ${notes || '—'}\n` +
+                            warningText + `\n` +
+                            `📋 _To correct any details, edit and send the copy-pasteable command below:_`;
+
+                        // Send summary card & copy-pasteable command as two separate outbound WhatsApp messages
+                        await sendWhatsApp(From, responseMessage);
+                        await sendWhatsApp(From, generatedCommand);
+                    });
 
                 } catch (err) {
                     logError('[OCR DELIVERY] Error processing:', err);
@@ -810,13 +857,23 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
         const content = text.replace(/^\/\w+\s*/, '').trim(); 
         let args = content.split(',').map(s => s.trim());
 
+        let isUpdate = false;
+        let updateOrderId = null;
+        let argsOffset = 0;
+
+        if (commandType === 'Delivery' && args.length > 0 && /^\d+$/.test(args[0])) {
+            isUpdate = true;
+            updateOrderId = parseInt(args[0]);
+            argsOffset = 1;
+        }
+
         // Basic Validation (Name & Mobile are strictly required)
         if (!content.includes(',')) {
              res.set('Content-Type', 'text/xml');
              return res.send(`<Response><Message>❌ *Comma Missing*\nYou MUST use COMMAS ( , ) to separate details.\nExample: */a Rahul, 9876543210, 11:30, Ring*</Message></Response>`);
         }
 
-        if (args.length < 2) {
+        if (args.length < (2 + argsOffset)) {
              res.set('Content-Type', 'text/xml');
              return res.send(`<Response><Message>❌ *Invalid Format*\nName and Mobile are mandatory.\nTry: */help ${commandType.toLowerCase()}*</Message></Response>`);
         }
@@ -824,7 +881,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
         // --- MAPPING FIELDS BASED ON TYPE ---
         // Common Fields: Name (0), Mobile (1), Address (2), Total (3), Advance (4)
         
-        const rawName = args[0] || 'Unknown';
+        const rawName = args[argsOffset + 0] || 'Unknown';
         const nameParts = rawName.split(' ');
         const firstName = nameParts[0];
         const lastName = nameParts.slice(1).join(' ') || '';
@@ -837,10 +894,10 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
             return isNaN(parsed) ? 0 : parsed;
         };
 
-        const mobile = args[1] || '';
-        const address = args[2] || '';
-        const totalAmount = parseAmount(args[3]);
-        const advancePaid = parseAmount(args[4]);
+        const mobile = args[argsOffset + 1] || '';
+        const address = args[argsOffset + 2] || '';
+        const totalAmount = parseAmount(args[argsOffset + 3]);
+        const advancePaid = parseAmount(args[argsOffset + 4]);
         
         let remainingAmount = 0;
         if (totalAmount === -1 || advancePaid === -1) {
@@ -860,8 +917,8 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
             karigarName = args[5] || '';
             notes = args.slice(6).join(', ');
         } else if (commandType === 'Delivery') {
-            trackingNumber = args[5] || '';
-            notes = args.slice(6).join(', ');
+            trackingNumber = args[argsOffset + 5] || '';
+            notes = args.slice(argsOffset + 6).join(', ');
         } else if (commandType === 'Appointment') {
             // Format: /a Name, Mobile, Time, Notes, Date
             const aName = args[0] || 'Unknown';
@@ -928,7 +985,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
             
             req.slotIndex = slotIdx; // Pass to insert
         } else {
-            notes = args.slice(5).join(', ');
+            notes = args.slice(argsOffset + 5).join(', ');
         }
 
         // --- SESSION STATE CHECK ---
@@ -1012,22 +1069,52 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
             return;
         }
 
-        const sql = `
-            INSERT INTO orders (
-                firstName, lastName, mobile, address, 
-                totalAmount, advancePaid, remainingAmount, 
-                type, karigarName, trackingNumber, notes, 
-                photoUrl, orderReceivedDate, shippingDate
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `;
-
-        const values = [
-            firstName, lastName, mobile, address,
-            totalAmount, advancePaid, remainingAmount,
-            commandType, karigarName, trackingNumber, notes,
-            photoUrl, today,
-            commandType === 'Delivery' ? today : null
-        ];
+        let sql, values;
+        if (isUpdate) {
+            if (photoUrl) {
+                sql = `
+                    UPDATE orders SET 
+                        firstName = ?, lastName = ?, mobile = ?, address = ?, 
+                        totalAmount = ?, advancePaid = ?, remainingAmount = ?, 
+                        trackingNumber = ?, notes = ?, photoUrl = ?
+                    WHERE id = ?
+                `;
+                values = [
+                    firstName, lastName, mobile, address,
+                    totalAmount, advancePaid, remainingAmount,
+                    trackingNumber, notes, photoUrl, updateOrderId
+                ];
+            } else {
+                sql = `
+                    UPDATE orders SET 
+                        firstName = ?, lastName = ?, mobile = ?, address = ?, 
+                        totalAmount = ?, advancePaid = ?, remainingAmount = ?, 
+                        trackingNumber = ?, notes = ?
+                    WHERE id = ?
+                `;
+                values = [
+                    firstName, lastName, mobile, address,
+                    totalAmount, advancePaid, remainingAmount,
+                    trackingNumber, notes, updateOrderId
+                ];
+            }
+        } else {
+            sql = `
+                INSERT INTO orders (
+                    firstName, lastName, mobile, address, 
+                    totalAmount, advancePaid, remainingAmount, 
+                    type, karigarName, trackingNumber, notes, 
+                    photoUrl, orderReceivedDate, shippingDate
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `;
+            values = [
+                firstName, lastName, mobile, address,
+                totalAmount, advancePaid, remainingAmount,
+                commandType, karigarName, trackingNumber, notes,
+                photoUrl, today,
+                commandType === 'Delivery' ? today : null
+            ];
+        }
 
         db.run(sql, values, async function (err) {
             if (err) {
@@ -1037,8 +1124,9 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
 
             // Success Response
             const formatDisp = (val) => (val === -1) ? 'TBD' : (val || 0).toLocaleString();
+            const orderId = isUpdate ? updateOrderId : this.lastID;
 
-            let responseText = `✅ *${commandType} Created!* (ID: ${this.lastID})\n` +
+            let responseText = `✅ *${commandType} ${isUpdate ? 'Updated' : 'Created'}!* (ID: ${orderId})\n` +
                 `👤 ${firstName} ${lastName}\n` +
                 `📱 ${mobile}\n` +
                 `💰 Bal: ${formatDisp(remainingAmount)}`;
@@ -1051,13 +1139,13 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
             if (commandType !== 'Delivery') {
                 // Create Order Object for PDF
                 const order = {
-                    id: this.lastID, firstName, lastName, mobile, address, 
+                    id: orderId, firstName, lastName, mobile, address, 
                     totalAmount, advancePaid, remainingAmount,
                     type: commandType, karigarName, notes, photoUrl
                 };
 
                 const s3Url = await createAndUploadInvoice(order, s3, bucket, region);
-                invoiceUrl = s3Url || `https://deepasoms.duckdns.org/api/orders/${this.lastID}/invoice?t=${Date.now()}`;
+                invoiceUrl = s3Url || `https://deepasoms.duckdns.org/api/orders/${orderId}/invoice?t=${Date.now()}`;
 
                 let waLink = "No mobile number";
                 if (mobile) {
