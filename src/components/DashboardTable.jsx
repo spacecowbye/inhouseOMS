@@ -243,7 +243,7 @@ const DashboardTable = ({
     if (cleanMobile.startsWith('0')) cleanMobile = cleanMobile.slice(1);
     if (cleanMobile.length === 10) cleanMobile = '91' + cleanMobile;
 
-    const message = `Hi ${order.firstName}, attaching your invoice below`;
+    const message = `Hi ${order.firstName}, please find your invoice in the next message.`;
     const waUrl = `https://wa.me/${cleanMobile}?text=${encodeURIComponent(message)}`;
 
     window.open(waUrl, '_blank');
@@ -483,7 +483,7 @@ const DashboardTable = ({
                       {/* PAYMENT */}
                       <td className="px-4 py-4 hidden md:table-cell">
                         {(() => {
-                          const formatVal = (v) => (v === -1) ? "To Be Determined" : `₹${(v || 0).toLocaleString()}`;
+                          const formatVal = (v) => (v === -1 || v === "-1") ? "To Be Determined" : `₹${(parseFloat(v) || 0).toLocaleString()}`;
                           return (
                             <>
                               <div className="text-sm font-semibold text-gray-900">

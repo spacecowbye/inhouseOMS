@@ -230,9 +230,17 @@ const App = () => {
       }
 
       if (name === "totalAmount" || name === "advancePaid") {
-        const total = parseFloat(name === "totalAmount" ? value : updated.totalAmount) || 0;
-        const advance = parseFloat(name === "advancePaid" ? value : updated.advancePaid) || 0;
-        updated.remainingAmount = (total - advance).toString();
+        const totalVal = name === "totalAmount" ? value : updated.totalAmount;
+        const advanceVal = name === "advancePaid" ? value : updated.advancePaid;
+
+        const total = (totalVal === "" || totalVal === "-1" || totalVal === -1) ? -1 : parseFloat(totalVal);
+        const advance = parseFloat(advanceVal) || 0;
+
+        if (total === -1 || isNaN(total)) {
+          updated.remainingAmount = "-1";
+        } else {
+          updated.remainingAmount = (total - advance).toString();
+        }
       }
       return updated;
     });
@@ -258,9 +266,9 @@ const App = () => {
       ...formData,
       photoUrl: finalPhotoUrl,
       photoFile: undefined,
-      totalAmount: parseFloat(formData.totalAmount) || 0,
+      totalAmount: (formData.totalAmount === "" || formData.totalAmount === "-1" || formData.totalAmount === -1) ? -1 : (parseFloat(formData.totalAmount) || 0),
       advancePaid: parseFloat(formData.advancePaid) || 0,
-      remainingAmount: parseFloat(formData.remainingAmount) || 0,
+      remainingAmount: (formData.remainingAmount === "" || formData.remainingAmount === "-1" || formData.remainingAmount === -1) ? -1 : (parseFloat(formData.remainingAmount) || 0),
       repairCourierCharges: parseFloat(formData.repairCourierCharges) || null,
     };
 

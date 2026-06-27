@@ -81,7 +81,7 @@ async function executeSessionOrder(senderKey, session, db, s3, bucket, region) {
             let waLink = "No mobile number";
             if (command.mobile) {
                 const cleanMobile = normalizeMobile(command.mobile);
-                const customerMsg = `Hi ${command.firstName}, here is your invoice: ${invoiceUrl}`;
+                const customerMsg = `Hi ${command.firstName}, please find your invoice in the next message.`;
                 waLink = `https://wa.me/${cleanMobile}?text=${encodeURIComponent(customerMsg)}`;
             }
 
@@ -666,7 +666,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                     let waLink = "No mobile number";
                     if (row.mobile) {
                         const cleanMobile = normalizeMobile(row.mobile);
-                        const customerMsg = `Hi ${row.firstName}, your repair is ready and collected! Here is your PAID & DELIVERED invoice: ${invoiceUrl}`;
+                        const customerMsg = `Hi ${row.firstName}, your repair is ready and collected! Please find your PAID & DELIVERED invoice in the next message.`;
                         waLink = `https://wa.me/${cleanMobile}?text=${encodeURIComponent(customerMsg)}`;
                     }
 
@@ -705,7 +705,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                 let waLink = "No mobile number";
                 if (row.mobile) {
                     const cleanMobile = normalizeMobile(row.mobile);
-                    const customerMsg = `Hi ${row.firstName}, here is your invoice: ${invoiceUrl}`;
+                    const customerMsg = `Hi ${row.firstName}, please find your invoice in the next message.`;
                     waLink = `https://wa.me/${cleanMobile}?text=${encodeURIComponent(customerMsg)}`;
                 }
 
@@ -1161,7 +1161,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                 let waLink = "No mobile number";
                 if (mobile) {
                     const cleanMobile = normalizeMobile(mobile);
-                    const customerMsg = `Hi ${firstName}, here is your invoice: ${invoiceUrl}`;
+                    const customerMsg = `Hi ${firstName}, please find your invoice in the next message.`;
                     waLink = `https://wa.me/${cleanMobile}?text=${encodeURIComponent(customerMsg)}`;
                 }
 
