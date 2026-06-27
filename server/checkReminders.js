@@ -1,5 +1,6 @@
 import sqlite3 from 'sqlite3';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import { sendWhatsApp } from './whatsappBot.js';
@@ -47,6 +48,39 @@ async function run() {
     const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
     log(`Today's date (IST): ${todayStr}`);
 
+    // Hour check: Only send if it's the 8:00 AM hour (8:00 - 8:59)
+    const kolkataHourStr = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Kolkata',
+        hour: 'numeric',
+        hour12: false
+    }).format(new Date());
+    const currentHour = parseInt(kolkataHourStr, 10);
+    log(`Current hour in Kolkata: ${currentHour}`);
+
+    if (currentHour !== 8) {
+        log("Not 8:00 AM hour. Exiting.");
+        db.close(() => process.exit(0));
+        return;
+    }
+
+    // Daily digest state check
+    const statePath = path.join(__dirname, 'data', 'digest_state.json');
+    let state = { lastSentDate: "" };
+
+    if (fs.existsSync(statePath)) {
+        try {
+            state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+        } catch (parseErr) {
+            logError("Failed to parse digest_state.json:", parseErr.message);
+        }
+    }
+
+    if (state.lastSentDate === todayStr) {
+        log(`Daily digest already sent today (${todayStr}). Exiting.`);
+        db.close(() => process.exit(0));
+        return;
+    }
+
     // Query today's appointments
     const sql = `SELECT * FROM appointments WHERE date = ? ORDER BY time ASC`;
     
@@ -77,6 +111,19 @@ async function run() {
         for (const target of targets) {
             log(`Sending daily digest to admin: ${target}`);
             await sendWhatsApp(target, body);
+        }
+
+        // Save state
+        state.lastSentDate = todayStr;
+        try {
+            const dataDir = path.dirname(statePath);
+            if (!fs.existsSync(dataDir)) {
+                fs.mkdirSync(dataDir, { recursive: true });
+            }
+            fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+            log(`Daily digest state saved for date ${todayStr}.`);
+        } catch (writeErr) {
+            logError("Failed to write digest_state.json:", writeErr.message);
         }
 
         db.close(() => {
