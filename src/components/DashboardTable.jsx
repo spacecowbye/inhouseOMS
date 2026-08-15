@@ -114,15 +114,20 @@ const SkeletonRow = () => (
 );
 
 // ----- Tracking Modal -----
-const TrackingModal = ({ awb, html, isLoading, onClose }) => {
+const TrackingModal = ({ awb, html, dueDate, isLoading, onClose }) => {
   if (!awb) return null;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[80vh] flex flex-col">
         <div className="flex justify-between items-center p-4 border-b">
-          <h3 className="text-lg font-bold text-gray-900">
-            Tracking Details: {awb}
+          <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2 flex-wrap">
+            <span>Tracking Details: {awb}</span>
+            {dueDate && (
+              <span className="text-sm font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded shadow-sm">
+                Due Date: {dueDate}
+              </span>
+            )}
           </h3>
           <button
             onClick={onClose}
@@ -173,12 +178,14 @@ const DashboardTable = ({
   // Tracking State
   const [trackingAwb, setTrackingAwb] = useState(null);
   const [trackingHtml, setTrackingHtml] = useState(null);
+  const [trackingDueDate, setTrackingDueDate] = useState(null);
   const [isTrackingLoading, setIsTrackingLoading] = useState(false);
 
   const handleTrackOrder = async (awb) => {
     setTrackingAwb(awb);
     setIsTrackingLoading(true);
     setTrackingHtml(null);
+    setTrackingDueDate(null);
 
     try {
       const response = await fetch('/api/track-order', {
@@ -189,6 +196,12 @@ const DashboardTable = ({
         },
         body: JSON.stringify({ awb })
       });
+      
+      const dueDate = response.headers.get('x-due-date');
+      if (dueDate) {
+        setTrackingDueDate(dueDate);
+      }
+      
       const html = await response.text();
       setTrackingHtml(html);
     } catch (error) {
@@ -624,6 +637,7 @@ const DashboardTable = ({
         <TrackingModal
           awb={trackingAwb}
           html={trackingHtml}
+          dueDate={trackingDueDate}
           isLoading={isTrackingLoading}
           onClose={() => setTrackingAwb(null)}
         />

@@ -537,6 +537,14 @@ app.post('/api/track-order', async (req, res) => {
             cleanHtml = cleanHtml.replace(/onclick="[^"]*"/g, '');
             cleanHtml = cleanHtml.replace(/href="#BModel"/g, 'href="#" style="pointer-events: none; text-decoration: none; color: inherit;"');
             
+            // Extract DueDate if present
+            const dueDateMatch = trackonHtml.match(/DueDate\s*:\s*(\d{2}\/\d{2}\/\d{4})/i);
+            if (dueDateMatch) {
+                const dueDate = dueDateMatch[1];
+                res.setHeader('X-Due-Date', dueDate);
+                console.log(`[INFO] Scraped DueDate for Trackon AWB ${awb}: ${dueDate}`);
+            }
+
             const hideCss = `
                 <style>
                     table.footable tr > *:nth-child(2), 
