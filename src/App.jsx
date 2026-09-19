@@ -7,8 +7,9 @@ import OrderForm from "./components/OrderForm";
 import DashboardTable from "./components/DashboardTable";
 import LoginScreen from "./components/LoginScreen";
 import CalendarView from "./components/CalendarView";
-import { LayoutList, Calendar as CalendarIcon, Sparkles } from "lucide-react";
+import { LayoutList, Calendar as CalendarIcon, Sparkles, Hammer } from "lucide-react";
 import InventoryView from "./components/InventoryView";
+import KarigarGalleryView from "./components/KarigarGalleryView";
 
 const API_BASE_URL = "/api/orders";
 const DEBOUNCE_DELAY_MS = 300;
@@ -408,10 +409,18 @@ const App = () => {
         <div className="mb-6 md:mb-8 flex justify-between items-center">
           <div>
             <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">
-              {view === 'inventory' ? 'Polki Collection Inventory' : 'Jewelry Order Dashboard'}
+              {view === 'inventory'
+                ? 'Polki Collection Inventory'
+                : view === 'karigar'
+                ? 'Karigar Workshop & Repairs Gallery'
+                : 'Jewelry Order Dashboard'}
             </h1>
             <p className="text-sm md:text-base text-gray-600">
-              {view === 'inventory' ? 'Manage and track loose Polki jewelry stock' : 'Track and manage all jewelry orders'}
+              {view === 'inventory'
+                ? 'Manage and track loose Polki jewelry stock'
+                : view === 'karigar'
+                ? 'Visual tracking of jewelry pieces sent to karigars & showroom returns'
+                : 'Track and manage all jewelry orders'}
             </p>
           </div>
 
@@ -438,6 +447,13 @@ const App = () => {
               >
                 <Sparkles size={20} />
               </button>
+              <button
+                onClick={() => setView('karigar')}
+                className={`p-2 rounded-md transition-all ${view === 'karigar' ? 'bg-white shadow-sm text-amber-600' : 'text-gray-500 hover:text-gray-700'}`}
+                title="Karigar Workshop Gallery"
+              >
+                <Hammer size={20} />
+              </button>
             </div>
 
             <button
@@ -456,7 +472,7 @@ const App = () => {
           </div>
         )}
 
-        {view !== 'inventory' && (
+        {view !== 'inventory' && view !== 'karigar' && (
           <>
             <StatsCards stats={globalStats} isLoading={isLoading} />
 
@@ -486,7 +502,7 @@ const App = () => {
           </>
         )}
 
-        {/* Orders List/Calendar/Inventory */}
+        {/* Orders List/Calendar/Inventory/Karigar */}
         {view === 'list' ? (
           <DashboardTable
             orders={displayOrders}
@@ -500,12 +516,14 @@ const App = () => {
           />
         ) : view === 'calendar' ? (
           <CalendarView orders={displayOrders} appointments={appointments} />
-        ) : (
+        ) : view === 'inventory' ? (
           <InventoryView authHeaders={getAuthHeader()} />
+        ) : (
+          <KarigarGalleryView authHeaders={getAuthHeader()} />
         )}
 
         {/* Footer */}
-        {view !== 'inventory' && (
+        {view !== 'inventory' && view !== 'karigar' && (
           <div className="text-center mt-4 text-sm text-gray-650">
             {isLoading
               ? "Fetching all records..."

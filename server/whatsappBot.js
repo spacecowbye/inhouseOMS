@@ -4,6 +4,7 @@ import { generateInvoiceBuffer } from './invoiceGenerator.js';
 import sharp from 'sharp';
 import { extractPriceFromImage, extractDeliveryDetailsFromImage } from './src/utils/ocrUtils.js';
 import { generateSkuId } from './src/utils/skuUtils.js';
+import { generateKarigarSerialNumber, parseKarigarCommand } from './src/utils/karigarUtils.js';
 
 const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 const TWILIO_FROM = process.env.TWILIO_FROM_NUMBER || 'whatsapp:+14155238886';
@@ -17,6 +18,7 @@ const WORK_END_HOUR = 20; // 8 PM
 const SLOT_MINUTES = 30;
 
 const pendingPhotosSession = new Map();
+const pendingKarigarSessions = new Map();
 
 async function executeSessionOrder(senderKey, session, db, s3, bucket, region) {
     log(`[PHOTOS-SESSION] Executing saved order for ${senderKey} with ${session.mediaUrls.length} photos.`);
@@ -457,6 +459,8 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
         
         // --- HELP HANDLERS ---
         const fullHelp = `🤖 *Deepa's Jewelry Bot - All Commands*\n\n` +
+                         `🔨 *KARIGAR REPAIR:* \`/kr <name> [photos]\` (e.g. /kr Hemant with photo, or /kr Hemant 3)\n` +
+                         `🏭 *KARIGAR RETURN:* \`/kc <serial>\` (e.g. /kc HEM1 marks returned to showroom)\n` +
                          `🛠 *REPAIR:* \`/repair Name, Mobile, Address, Total, Advance, Karigar, Notes\`\n` +
                          `📝 *ORDER:* \`/order Name, Mobile, Address, Total, Advance, Notes\`\n` +
                          `🚚 *DELIVERY:* \`/delivery Name, Mobile, Address, Total, Advance, AWB, Notes\`\n` +
@@ -475,7 +479,21 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
         if (lowerText.startsWith('/help')) {
             const sepInfo = "⚠️ *IMPORTANT:* Separate each detail with a COMMA ( , )";
 
-            if (lowerText.includes('repair')) {
+            if (lowerText.includes('karigar') || lowerText.includes('kr') || lowerText.includes('kc')) {
+                const karigarHelp = `🔨 *KARIGAR REPAIR TRACKING*\n\n` +
+                          `1️⃣ *Send Pieces to Karigar:*\n` +
+                          `• 1 Photo: Attach photo with caption */kr <name>*\n` +
+                          `  _Example:_ */kr Hemant*\n` +
+                          `• Multiple Photos: Send */kr <name> <count>*\n` +
+                          `  _Example:_ */kr Hemant 3*\n` +
+                          `  Then send the 3 photos.\n` +
+                          `  _Generates serial like *HEM1*, *HEM2*..._\n\n` +
+                          `2️⃣ *Return from Karigar to Showroom:*\n` +
+                          `• Command: */kc <serial>*\n` +
+                          `  _Example:_ */kc HEM1*\n` +
+                          `  _Removes items from the active Karigar workshop gallery._`;
+                return sendTwiML(res, karigarHelp);
+            } else if (lowerText.includes('repair')) {
                 const repairHelp = `🛠 *REPAIR Order Format*\n${sepInfo}\n\n` +
                           `*Command:*\n/repair Name, Mobile, Address, Total, Advance, Karigar, Notes\n\n` +
                           `*Example:*\n/repair Deepa Ben, 9925042620, Ahmedabad, 5000, 1000, Anil, Resize Ring\n\n` +
@@ -621,6 +639,180 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                 });
             });
             return;
+        }
+
+        // --- KARIGAR COMPLETED / CLEAR COMMAND (/kc) ---
+        if (lowerText.startsWith('/kc')) {
+            const rawSerial = text.replace(/^\/kc\s*/i, '').trim();
+            if (!rawSerial) {
+                res.set('Content-Type', 'text/xml');
+                return res.send(`<Response><Message>❌ Please provide a Serial Number.\nExample: */kc HEM1*</Message></Response>`);
+            }
+
+            const searchSerial = rawSerial.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+            log(`[TWILIO] Processing /kc for serial: ${rawSerial} (search: ${searchSerial})`);
+
+            db.get(
+                "SELECT * FROM karigar_repairs WHERE UPPER(REPLACE(serial_number, '-', '')) = ? ORDER BY id DESC LIMIT 1",
+                [searchSerial],
+                (err, row) => {
+                    if (err) {
+                        logError('[TWILIO] DB Error in /kc:', err);
+                        res.set('Content-Type', 'text/xml');
+                        return res.send('<Response><Message>❌ Database Error</Message></Response>');
+                    }
+
+                    if (!row) {
+                        res.set('Content-Type', 'text/xml');
+                        return res.send(`<Response><Message>❌ No Karigar repair found with Serial *${rawSerial.toUpperCase()}*.</Message></Response>`);
+                    }
+
+                    if (row.status === 'returned') {
+                        res.set('Content-Type', 'text/xml');
+                        return res.send(`<Response><Message>⚠️ Serial *${row.serial_number}* for *${row.karigar_name}* was already marked as returned on ${row.returned_date || 'earlier'}.</Message></Response>`);
+                    }
+
+                    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+                    db.run(
+                        "UPDATE karigar_repairs SET status = 'returned', returned_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        [today, row.id],
+                        function (updateErr) {
+                            if (updateErr) {
+                                logError('[TWILIO] Update Error in /kc:', updateErr);
+                                res.set('Content-Type', 'text/xml');
+                                return res.send('<Response><Message>❌ Database update error.</Message></Response>');
+                            }
+
+                            const photosCount = row.photo_count || (row.photo_urls ? row.photo_urls.split(',').length : 1);
+                            const msg = `✅ *Karigar Repair Returned!* (${row.serial_number})\n\n` +
+                                `👤 *Karigar:* ${row.karigar_name}\n` +
+                                `📦 *Returned:* ${photosCount} piece(s) back at showroom\n` +
+                                `📅 *Date:* ${today}\n\n` +
+                                `_Item ${row.serial_number} is now marked returned and removed from the active workshop gallery._`;
+
+                            res.set('Content-Type', 'text/xml');
+                            return res.send(`<Response><Message>${msg}</Message></Response>`);
+                        }
+                    );
+                }
+            );
+            return;
+        }
+
+        // --- KARIGAR REPAIR INGEST (/kr) ---
+        if (lowerText.startsWith('/kr')) {
+            const parsed = parseKarigarCommand(text);
+            const karigarName = parsed.karigarName;
+            const expectedPhotos = parsed.count || 1;
+            const orderRef = parsed.orderRef || '';
+            const notes = parsed.notes || '';
+
+            if (!karigarName) {
+                res.set('Content-Type', 'text/xml');
+                return res.send(`<Response><Message>❌ *Karigar Name Required*\nExample: */kr Hemant* (attach photo) or */kr Hemant 3*</Message></Response>`);
+            }
+
+            // Case 1: Single photo with MediaUrl0 present
+            if (expectedPhotos === 1 && MediaUrl0) {
+                try {
+                    const { buffer, contentType } = await downloadMedia(MediaUrl0);
+                    let ext = 'jpg';
+                    if (contentType === 'image/png') ext = 'png';
+                    const filename = `karigar_repairs/whatsapp_${Date.now()}.${ext}`;
+                    await s3.send(new PutObjectCommand({
+                        Bucket: bucket, Key: filename, Body: buffer, ACL: "public-read", ContentType: contentType
+                    }));
+                    const photoUrl = `https://${bucket}.s3.${region}.amazonaws.com/${filename}`;
+
+                    const serialNumber = await generateKarigarSerialNumber(db, karigarName);
+                    const sql = `
+                        INSERT INTO karigar_repairs (
+                            serial_number, karigar_name, photo_urls, photo_count,
+                            status, order_id, notes, sent_date, sender_number
+                        ) VALUES (?, ?, ?, 1, 'with_karigar', ?, ?, ?, ?)
+                    `;
+
+                    db.run(sql, [serialNumber, karigarName, photoUrl, orderRef, notes, today, From], function (err) {
+                        if (err) {
+                            logError('[TWILIO] /kr DB insert error:', err);
+                            res.set('Content-Type', 'text/xml');
+                            return res.send('<Response><Message>❌ Failed to save Karigar repair in database.</Message></Response>');
+                        }
+
+                        let msg = `🔨 *Karigar Repair Logged!*\n\n` +
+                            `🏷️ *Serial:* ${serialNumber}\n` +
+                            `👤 *Karigar:* ${karigarName}\n` +
+                            `🖼️ *Pieces/Photos:* 1\n` +
+                            `📅 *Date:* ${today}\n`;
+                        if (orderRef) msg += `📄 *Order/Inv #:* ${orderRef}\n`;
+                        if (notes) msg += `📝 *Notes:* ${notes}\n`;
+                        msg += `\n_When received back at showroom, send:_\n👉 */kc ${serialNumber.toLowerCase()}*`;
+
+                        res.set('Content-Type', 'text/xml');
+                        return res.send(`<Response><Message>${msg}</Message></Response>`);
+                    });
+                } catch (err) {
+                    logError('[TWILIO] /kr media upload error:', err);
+                    res.set('Content-Type', 'text/xml');
+                    return res.send('<Response><Message>❌ Failed to upload photo. Please try again.</Message></Response>');
+                }
+                return;
+            }
+
+            // Case 2: Multi-photo session or command without photo
+            const existingSession = pendingKarigarSessions.get(From);
+            if (existingSession && existingSession.timer) {
+                clearTimeout(existingSession.timer);
+            }
+
+            const session = {
+                karigarName,
+                expectedPhotos,
+                orderRef,
+                notes,
+                mediaUrls: [],
+                today,
+                timer: null
+            };
+
+            if (MediaUrl0) {
+                try {
+                    const { buffer, contentType } = await downloadMedia(MediaUrl0);
+                    let ext = 'jpg';
+                    if (contentType === 'image/png') ext = 'png';
+                    const filename = `karigar_repairs/whatsapp_${Date.now()}_0.${ext}`;
+                    await s3.send(new PutObjectCommand({
+                        Bucket: bucket, Key: filename, Body: buffer, ACL: "public-read", ContentType: contentType
+                    }));
+                    const photoUrl = `https://${bucket}.s3.${region}.amazonaws.com/${filename}`;
+                    session.mediaUrls.push(photoUrl);
+                } catch (err) {
+                    logError('[TWILIO] /kr session initial photo error:', err);
+                }
+            }
+
+            session.timer = setTimeout(() => {
+                log(`[KARIGAR-SESSION] Timeout reached for ${From}.`);
+                pendingKarigarSessions.delete(From);
+                sendWhatsApp(From, `⚠️ Karigar repair session for *${karigarName}* timed out. Please send */kr ${karigarName} ${expectedPhotos}* again.`);
+            }, 180000);
+
+            pendingKarigarSessions.set(From, session);
+
+            const received = session.mediaUrls.length;
+            const pending = expectedPhotos - received;
+
+            let replyMsg = `⏳ *Karigar Repair Session Started*\n` +
+                `👤 *Karigar:* ${karigarName}\n` +
+                `📸 *Expecting:* ${expectedPhotos} photo(s)\n`;
+            if (received > 0) {
+                replyMsg += `✅ Received photo 1. Please send the remaining ${pending} photo(s).`;
+            } else {
+                replyMsg += `Please send the ${expectedPhotos} photo(s) now.`;
+            }
+
+            res.set('Content-Type', 'text/xml');
+            return res.send(`<Response><Message>${replyMsg}</Message></Response>`);
         }
 
         // --- REPAIR COLLECTED COMMAND ---
@@ -788,6 +980,83 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
         }
 
         if (!commandType) {
+            // Check if this sender has a pending Karigar repair photo session
+            const karigarSession = pendingKarigarSessions.get(From);
+            if (karigarSession && MediaUrl0) {
+                try {
+                    const { buffer, contentType } = await downloadMedia(MediaUrl0);
+                    let ext = 'jpg';
+                    if (contentType === 'image/png') ext = 'png';
+                    const filename = `karigar_repairs/whatsapp_${Date.now()}_${karigarSession.mediaUrls.length}.${ext}`;
+                    await s3.send(new PutObjectCommand({
+                        Bucket: bucket, Key: filename, Body: buffer, ACL: "public-read", ContentType: contentType
+                    }));
+                    const photoUrl = `https://${bucket}.s3.${region}.amazonaws.com/${filename}`;
+                    karigarSession.mediaUrls.push(photoUrl);
+
+                    clearTimeout(karigarSession.timer);
+                    const received = karigarSession.mediaUrls.length;
+                    const pending = karigarSession.expectedPhotos - received;
+
+                    if (pending <= 0) {
+                        pendingKarigarSessions.delete(From);
+                        const serialNumber = await generateKarigarSerialNumber(db, karigarSession.karigarName);
+                        const sql = `
+                            INSERT INTO karigar_repairs (
+                                serial_number, karigar_name, photo_urls, photo_count,
+                                status, order_id, notes, sent_date, sender_number
+                            ) VALUES (?, ?, ?, ?, 'with_karigar', ?, ?, ?, ?)
+                        `;
+                        const values = [
+                            serialNumber,
+                            karigarSession.karigarName,
+                            karigarSession.mediaUrls.join(','),
+                            karigarSession.mediaUrls.length,
+                            karigarSession.orderRef,
+                            karigarSession.notes,
+                            karigarSession.today,
+                            From
+                        ];
+
+                        db.run(sql, values, async function (err) {
+                            if (err) {
+                                logError('[KARIGAR-SESSION] DB insert error:', err);
+                                await sendWhatsApp(From, `❌ Database error saving Karigar repair.`);
+                                return;
+                            }
+
+                            let completeMsg = `🔨 *Karigar Repair Logged!*\n\n` +
+                                `🏷️ *Serial:* ${serialNumber}\n` +
+                                `👤 *Karigar:* ${karigarSession.karigarName}\n` +
+                                `🖼️ *Pieces/Photos Attached:* ${karigarSession.mediaUrls.length}\n` +
+                                `📅 *Date:* ${karigarSession.today}\n`;
+                            if (karigarSession.orderRef) completeMsg += `📄 *Order/Inv #:* ${karigarSession.orderRef}\n`;
+                            if (karigarSession.notes) completeMsg += `📝 *Notes:* ${karigarSession.notes}\n`;
+                            completeMsg += `\n_When received back at showroom, send:_\n👉 */kc ${serialNumber.toLowerCase()}*`;
+
+                            await sendWhatsApp(From, completeMsg);
+                        });
+
+                        res.set('Content-Type', 'text/xml');
+                        return res.send('<Response></Response>');
+                    } else {
+                        // Reset timer with 3 mins fallback
+                        karigarSession.timer = setTimeout(() => {
+                            log(`[KARIGAR-SESSION] Timeout reached for ${From}.`);
+                            pendingKarigarSessions.delete(From);
+                            sendWhatsApp(From, `⚠️ Karigar repair session timed out waiting for photos.`);
+                        }, 180000);
+
+                        res.set('Content-Type', 'text/xml');
+                        return res.send(`<Response><Message>⏳ Received ${received} of ${karigarSession.expectedPhotos} photos for *${karigarSession.karigarName}*. Please send ${pending} more.</Message></Response>`);
+                    }
+                } catch (err) {
+                    logError('[KARIGAR-SESSION] Error handling photo:', err);
+                    res.set('Content-Type', 'text/xml');
+                    return res.send('<Response></Response>');
+                }
+            }
+
             // Check if this sender has a pending photos session
             const session = pendingPhotosSession.get(From);
             if (session && MediaUrl0) {

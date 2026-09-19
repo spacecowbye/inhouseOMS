@@ -66,6 +66,26 @@ CREATE TABLE IF NOT EXISTS appointments (
 );
 ```
 
+### 3. `karigar_repairs` Table
+Stores pieces sent to craftsmen (Karigars) for repair/work and showroom returns.
+```sql
+CREATE TABLE IF NOT EXISTS karigar_repairs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    serial_number TEXT UNIQUE NOT NULL,    -- Auto-generated: first 3 letters + sequence (e.g. 'HEM1')
+    karigar_name TEXT NOT NULL,           -- Karigar name (e.g. 'Hemant')
+    photo_urls TEXT NOT NULL,             -- S3 image URLs
+    photo_count INTEGER DEFAULT 1,
+    status TEXT DEFAULT 'with_karigar',   -- 'with_karigar' or 'returned'
+    order_id TEXT,                        -- Optional reference to order / invoice
+    notes TEXT,
+    sent_date TEXT NOT NULL,              -- YYYY-MM-DD
+    returned_date TEXT,                   -- YYYY-MM-DD
+    sender_number TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+```
+
 ---
 
 ## 💬 WhatsApp Integration & Bot Commands
@@ -76,7 +96,9 @@ The backend exposes `/api/whatsapp-webhook` which listens to incoming Twilio web
 
 | Command | Usage / Format | Description / Example |
 | :--- | :--- | :--- |
-| **`/help`** | `/help [repair \| delivery \| appointment]` | Returns general instructions or format details for a specific command type. |
+| **`/kr`** | `/kr <Name> [count]` or caption `/kr <Name>` | **Karigar Repair**: Logs pieces sent to Karigar. Auto-generates serial with first 3 letters (e.g. `HEM1`). |
+| **`/kc`** | `/kc <Serial>` | **Karigar Clear/Complete**: Marks piece returned to showroom (e.g. `/kc HEM1`) and removes from active gallery. |
+| **`/help`** | `/help [repair \| delivery \| appointment \| karigar]` | Returns general instructions or format details for a specific command type. |
 | **`/order`** | `/order Name, Mobile, Address, Total, Advance, Notes` | Creates a new order entry and responds with a draft invoice. |
 | **`/repair`** | `/repair Name, Mobile, Address, Total, Advance, Karigar, Notes` | Creates a repair order (usually with an attached image) and sends back a PDF invoice link. |
 | **`/delivery`** | `/delivery Name, Mobile, Address, Total, Advance, AWB, Notes` | Creates a delivery entry. Auto-detects UPS and Trackon/Mahavir tracking numbers. |

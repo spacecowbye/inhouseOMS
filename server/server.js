@@ -18,6 +18,7 @@ const app = express();
 import { handleTwilioMessage, sendWhatsApp, timeToSlotIndex, initReminders, addReminderForAppointment, removeReminderForAppointment } from "./whatsappBot.js" 
 import { generateInvoiceBuffer } from "./invoiceGenerator.js"
 import createInventoryRouter from "./src/routes/inventory.js"
+import createKarigarRouter from "./src/routes/karigar.js"
 const PORT = 3001;
 
 // --- LOGGING HELPER ---
@@ -243,6 +244,30 @@ const db = new sqlite.Database(dbPath, (err) => {
                 }
             });
 
+            // Create karigar_repairs table
+            db.run(`
+                CREATE TABLE IF NOT EXISTS karigar_repairs (
+                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    serial_number       TEXT UNIQUE NOT NULL,
+                    karigar_name        TEXT NOT NULL,
+                    photo_urls          TEXT NOT NULL,
+                    photo_count         INTEGER DEFAULT 1,
+                    status              TEXT DEFAULT 'with_karigar',
+                    order_id            TEXT,
+                    notes               TEXT,
+                    sent_date           TEXT NOT NULL,
+                    returned_date       TEXT,
+                    sender_number       TEXT,
+                    created_at          TEXT DEFAULT (datetime('now')),
+                    updated_at          TEXT DEFAULT (datetime('now'))
+                )
+            `, (err) => {
+                if (err) console.error("[ERROR] Error creating karigar_repairs table:", err.message);
+                else {
+                    console.log("[INFO] Karigar repairs table ready.");
+                }
+            });
+
             console.log("[INFO] Orders table ready.");
             initReminders(db);
         });
@@ -251,6 +276,9 @@ const db = new sqlite.Database(dbPath, (err) => {
 
 // --- INVENTORY API ---
 app.use('/api/inventory', createInventoryRouter(db, s3, process.env.S3_BUCKET_NAME, process.env.AWS_REGION));
+
+// --- KARIGAR REPAIRS API ---
+app.use('/api/karigar-repairs', createKarigarRouter(db, s3, process.env.S3_BUCKET_NAME, process.env.AWS_REGION));
 
 // --- TWILIO WEBHOOK ---
 app.post('/api/whatsapp-webhook', (req, res) => {
