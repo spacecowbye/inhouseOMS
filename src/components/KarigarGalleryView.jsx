@@ -263,54 +263,54 @@ export default function KarigarGalleryView({ authHeaders }) {
 
       {/* TOP METRICS HERO BANNER */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
-        <div className="bg-gradient-to-br from-amber-900/10 via-amber-800/5 to-white border border-amber-200/80 rounded-2xl p-4 md:p-5 shadow-sm">
+        <div className="bg-white border border-gray-200 rounded-lg p-4 md:p-5 shadow">
           <div className="flex items-center justify-between">
-            <span className="text-xs md:text-sm font-semibold text-amber-900/70 tracking-wide uppercase">
+            <span className="text-xs md:text-sm font-medium text-gray-500 uppercase">
               Pieces With Karigar
             </span>
             <span className="relative flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-3 w-3 bg-indigo-500"></span>
             </span>
           </div>
           <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl md:text-4xl font-extrabold text-amber-950 font-serif">
+            <span className="text-2xl md:text-4xl font-bold text-gray-900">
               {stats.totalActivePieces}
             </span>
-            <span className="text-xs text-amber-800/80 font-medium">active pieces</span>
+            <span className="text-xs text-gray-500">active pieces</span>
           </div>
         </div>
 
-        <div className="bg-white border border-gray-200/90 rounded-2xl p-4 md:p-5 shadow-sm">
+        <div className="bg-white border border-gray-200 rounded-lg p-4 md:p-5 shadow">
           <div className="text-xs md:text-sm font-semibold text-gray-500 tracking-wide uppercase">
             Active Job Batches
           </div>
           <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl md:text-4xl font-extrabold text-gray-900 font-serif">
+            <span className="text-2xl md:text-4xl font-bold text-gray-900">
               {stats.activeJobs}
             </span>
             <span className="text-xs text-gray-500 font-medium">serial slots</span>
           </div>
         </div>
 
-        <div className="bg-white border border-gray-200/90 rounded-2xl p-4 md:p-5 shadow-sm">
+        <div className="bg-white border border-gray-200 rounded-lg p-4 md:p-5 shadow">
           <div className="text-xs md:text-sm font-semibold text-gray-500 tracking-wide uppercase">
             Karigars Working
           </div>
           <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl md:text-4xl font-extrabold text-indigo-900 font-serif">
+            <span className="text-2xl md:text-4xl font-bold text-indigo-900">
               {stats.activeKarigars}
             </span>
             <span className="text-xs text-indigo-600 font-medium">craftsmen</span>
           </div>
         </div>
 
-        <div className="bg-white border border-gray-200/90 rounded-2xl p-4 md:p-5 shadow-sm">
+        <div className="bg-white border border-gray-200 rounded-lg p-4 md:p-5 shadow">
           <div className="text-xs md:text-sm font-semibold text-gray-500 tracking-wide uppercase">
             Returned This Month
           </div>
           <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl md:text-4xl font-extrabold text-emerald-800 font-serif">
+            <span className="text-2xl md:text-4xl font-bold text-emerald-800">
               {stats.returnedThisMonth}
             </span>
             <span className="text-xs text-emerald-600 font-medium">back in showroom</span>
@@ -319,24 +319,24 @@ export default function KarigarGalleryView({ authHeaders }) {
       </div>
 
       {/* SEARCH, STATUS & CONTROLS TOOLBAR */}
-      <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm space-y-4">
+      <div className="bg-white border border-gray-200 rounded-lg p-4 shadow space-y-4">
 
         {/* Row 1: Status Segments + Action Buttons */}
         <div className="flex flex-col md:flex-row justify-between gap-3 items-stretch md:items-center">
 
           {/* Status Tabs */}
-          <div className="inline-flex bg-gray-100/90 p-1 rounded-xl border border-gray-200 self-start">
+          <div className="inline-flex bg-gray-100 p-1 rounded-lg border border-gray-200 self-start">
             <button
               onClick={() => setStatusFilter('with_karigar')}
               className={`px-3.5 py-1.5 rounded-lg text-xs md:text-sm font-semibold transition-all duration-150 flex items-center gap-1.5 ${
                 statusFilter === 'with_karigar'
-                  ? 'bg-amber-500 text-white shadow-sm'
+                  ? 'bg-indigo-600 text-white shadow-sm'
                   : 'text-gray-600 hover:text-gray-900'
               }`}
             >
               <span>With Karigar (Active)</span>
               <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
-                statusFilter === 'with_karigar' ? 'bg-amber-600 text-white' : 'bg-gray-200 text-gray-700'
+                statusFilter === 'with_karigar' ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700'
               }`}>
                 {stats.totalActivePieces}
               </span>
@@ -346,7 +346,7 @@ export default function KarigarGalleryView({ authHeaders }) {
               onClick={() => setStatusFilter('returned')}
               className={`px-3.5 py-1.5 rounded-lg text-xs md:text-sm font-semibold transition-all duration-150 flex items-center gap-1.5 ${
                 statusFilter === 'returned'
-                  ? 'bg-emerald-600 text-white shadow-sm'
+                  ? 'bg-indigo-600 text-white shadow-sm'
                   : 'text-gray-600 hover:text-gray-900'
               }`}
             >
@@ -357,7 +357,7 @@ export default function KarigarGalleryView({ authHeaders }) {
               onClick={() => setStatusFilter('all')}
               className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-semibold transition-all duration-150 ${
                 statusFilter === 'all'
-                  ? 'bg-gray-800 text-white shadow-sm'
+                  ? 'bg-indigo-600 text-white shadow-sm'
                   : 'text-gray-600 hover:text-gray-900'
               }`}
             >
@@ -369,16 +369,16 @@ export default function KarigarGalleryView({ authHeaders }) {
           <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={() => setShowHelpGuide(!showHelpGuide)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs md:text-sm font-medium text-gray-700 bg-gray-50 border border-gray-300 rounded-xl hover:bg-gray-100 transition"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs md:text-sm font-medium text-gray-700 bg-gray-50 border border-gray-300 rounded-lg hover:bg-gray-100 transition"
               title="View WhatsApp commands guide"
             >
-              <HelpCircle size={16} className="text-amber-600" />
+              <HelpCircle size={16} className="text-indigo-600" />
               <span>WhatsApp Commands</span>
             </button>
 
             <button
               onClick={fetchData}
-              className="p-2 text-gray-600 hover:text-gray-900 bg-gray-50 border border-gray-300 rounded-xl hover:bg-gray-100 transition"
+              className="p-2 text-gray-600 hover:text-gray-900 bg-gray-50 border border-gray-300 rounded-lg hover:bg-gray-100 transition"
               title="Refresh Records"
             >
               <RefreshCw size={16} />
@@ -386,7 +386,7 @@ export default function KarigarGalleryView({ authHeaders }) {
 
             <button
               onClick={() => setShowAddModal(true)}
-              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs md:text-sm font-bold text-white bg-amber-600 rounded-xl hover:bg-amber-700 transition shadow-sm"
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs md:text-sm font-bold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition shadow-sm"
             >
               <Plus size={18} />
               <span>Log Karigar Repair</span>
@@ -447,7 +447,7 @@ export default function KarigarGalleryView({ authHeaders }) {
               placeholder="Search by serial (e.g. HEM1), karigar name, order / inv #..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs md:text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition"
+              className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-xs md:text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition"
             />
           </form>
 
@@ -457,7 +457,7 @@ export default function KarigarGalleryView({ authHeaders }) {
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value)}
-              className="bg-gray-50 border border-gray-300 text-xs md:text-sm rounded-xl px-3 py-2 font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              className="bg-gray-50 border border-gray-300 text-xs md:text-sm rounded-lg px-3 py-2 font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             >
               <option value="newest">Newest Sent</option>
               <option value="oldest">Oldest Sent</option>
@@ -478,7 +478,7 @@ export default function KarigarGalleryView({ authHeaders }) {
               onClick={() => setSelectedKarigar('all')}
               className={`px-3 py-1 rounded-full text-xs font-semibold transition whitespace-nowrap ${
                 selectedKarigar === 'all'
-                  ? 'bg-amber-600 text-white shadow-sm'
+                  ? 'bg-indigo-600 text-white shadow-sm'
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
             >
@@ -491,7 +491,7 @@ export default function KarigarGalleryView({ authHeaders }) {
                 onClick={() => setSelectedKarigar(k.name)}
                 className={`px-3 py-1 rounded-full text-xs font-semibold transition whitespace-nowrap flex items-center gap-1.5 ${
                   selectedKarigar.toLowerCase() === k.name.toLowerCase()
-                    ? 'bg-amber-600 text-white shadow-sm'
+                    ? 'bg-indigo-600 text-white shadow-sm'
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
               >
@@ -521,7 +521,7 @@ export default function KarigarGalleryView({ authHeaders }) {
       {isLoading && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
           {[1, 2, 3, 4, 5, 6].map(n => (
-            <div key={n} className="bg-white border border-gray-200 rounded-2xl p-4 space-y-3 animate-pulse">
+            <div key={n} className="bg-white border border-gray-200 rounded-lg p-4 space-y-3 animate-pulse">
               <div className="h-48 bg-gray-200 rounded-xl"></div>
               <div className="h-4 bg-gray-200 rounded w-1/3"></div>
               <div className="h-6 bg-gray-200 rounded w-3/4"></div>
@@ -533,11 +533,11 @@ export default function KarigarGalleryView({ authHeaders }) {
 
       {/* EMPTY STATE */}
       {!isLoading && repairs.length === 0 && (
-        <div className="bg-white border border-dashed border-gray-300 rounded-3xl p-12 text-center max-w-xl mx-auto space-y-4">
+        <div className="bg-white border border-dashed border-gray-300 rounded-lg p-12 text-center max-w-xl mx-auto space-y-4">
           <div className="w-16 h-16 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center mx-auto shadow-inner">
             <Hammer size={32} />
           </div>
-          <h3 className="text-lg md:text-xl font-bold text-gray-900 font-serif">
+          <h3 className="text-lg md:text-xl font-bold text-gray-900">
             {statusFilter === 'with_karigar' ? 'No Pieces Currently with Karigars' : 'No Repair Records Found'}
           </h3>
           <p className="text-sm text-gray-500">
@@ -558,7 +558,7 @@ export default function KarigarGalleryView({ authHeaders }) {
             </button>
             <button
               onClick={() => setShowAddModal(true)}
-              className="px-4 py-2 bg-amber-600 text-white font-bold text-xs rounded-xl hover:bg-amber-700 transition shadow"
+              className="px-4 py-2 bg-indigo-600 text-white font-bold text-xs rounded-lg hover:bg-indigo-700 transition shadow"
             >
               + Log New Karigar Repair
             </button>
@@ -578,10 +578,10 @@ export default function KarigarGalleryView({ authHeaders }) {
             return (
               <div
                 key={item.id}
-                className={`bg-white border rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-200 flex flex-col justify-between ${
+                className={`bg-white border rounded-lg overflow-hidden shadow hover:shadow-md transition-all duration-200 flex flex-col justify-between ${
                   isReturned
                     ? 'border-gray-200 opacity-90'
-                    : 'border-amber-200/90 hover:border-amber-300'
+                    : 'border-gray-200 hover:border-indigo-300'
                 }`}
               >
                 <div>
@@ -589,7 +589,7 @@ export default function KarigarGalleryView({ authHeaders }) {
                   <div className="p-3.5 pb-2.5 flex items-center justify-between gap-2 border-b border-gray-100">
                     <div className="flex items-center gap-2">
                       {/* LUXURY METALLIC HALLMARK SERIAL BADGE */}
-                      <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-black tracking-wider bg-gradient-to-r from-amber-500 via-amber-600 to-amber-700 text-white shadow-sm font-mono">
+                      <span className="inline-flex items-center px-2.5 py-1 rounded text-xs font-bold tracking-wider bg-indigo-100 text-indigo-700 font-mono">
                         {item.serial_number}
                       </span>
 
@@ -607,8 +607,8 @@ export default function KarigarGalleryView({ authHeaders }) {
                         <span>Returned</span>
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900">
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-900">
+                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></span>
                         <span>With Karigar</span>
                       </span>
                     )}
