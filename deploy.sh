@@ -1,6 +1,6 @@
 #!/bin/bash
 echo "🚀 Starting deployment..."
-git pull
+git pull origin main
 echo "🧹 Stopping containers..."
 docker compose down
 echo "📦 Building and starting containers..."
