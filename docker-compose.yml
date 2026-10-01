@@ -18,7 +18,7 @@ services:
       - 8.8.8.8
       - 8.8.4.4
     environment:
-      - ALLOWED_ORIGINS=http://deepasoms.duckdns.org,https://deepasoms.duckdns.org
+      - ALLOWED_ORIGINS=http://oms.deepassilverjewellery.co,https://oms.deepassilverjewellery.co
 
   # Frontend Service (React UI/Nginx)
   frontend:
@@ -26,7 +26,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        - VITE_API_BASE_URL=https://deepasoms.duckdns.org/api
+        - VITE_API_BASE_URL=https://oms.deepassilverjewellery.co/api
     container_name: jewelry_frontend
     restart: always
     ports:

@@ -78,7 +78,7 @@ async function executeSessionOrder(senderKey, session, db, s3, bucket, region) {
             };
 
             const s3Url = await createAndUploadInvoice(order, s3, bucket, region);
-            const invoiceUrl = s3Url || `https://deepasoms.duckdns.org/api/orders/${this.lastID}/invoice?t=${Date.now()}`;
+            const invoiceUrl = s3Url || `https://oms.deepassilverjewellery.co/api/orders/${this.lastID}/invoice?t=${Date.now()}`;
 
             let waLink = "No mobile number";
             if (command.mobile) {
