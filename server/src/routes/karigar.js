@@ -4,7 +4,7 @@ import sharp from 'sharp';
 import { CloudinaryPutObjectCommand } from '../utils/cloudinaryStorage.js';
 import { generateKarigarSerialNumber } from '../utils/karigarUtils.js';
 
-export default function createKarigarRouter(db, s3, bucket, region) {
+export default function createKarigarRouter(db, cloudinaryStore) {
     const router = express.Router();
 
     const upload = multer({
@@ -156,8 +156,7 @@ export default function createKarigarRouter(db, s3, bucket, region) {
                 }
 
                 const filename = `karigar_repairs/${Date.now()}_${i}.jpg`;
-                const uploaded = await s3.send(new CloudinaryPutObjectCommand({
-                    Bucket: bucket,
+                const uploaded = await cloudinaryStore.send(new CloudinaryPutObjectCommand({
                     Key: filename,
                     Body: outputBuffer,
                     ACL: "public-read",

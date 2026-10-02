@@ -20,7 +20,7 @@ const SLOT_MINUTES = 30;
 const pendingPhotosSession = new Map();
 const pendingKarigarSessions = new Map();
 
-async function executeSessionOrder(senderKey, session, db, s3, bucket, region) {
+async function executeSessionOrder(senderKey, session, db, cloudinaryStore) {
     log(`[PHOTOS-SESSION] Executing saved order for ${senderKey} with ${session.mediaUrls.length} photos.`);
     
     const finalPhotoUrl = session.mediaUrls.join(',');
@@ -77,8 +77,8 @@ async function executeSessionOrder(senderKey, session, db, s3, bucket, region) {
                 photoUrl: finalPhotoUrl
             };
 
-            const s3Url = await createAndUploadInvoice(order, s3, bucket, region);
-            const invoiceUrl = s3Url || `https://oms.deepassilverjewellery.co/api/orders/${this.lastID}/invoice?t=${Date.now()}`;
+            const cloudinaryUrl = await createAndUploadInvoice(order, cloudinaryStore);
+            const invoiceUrl = cloudinaryUrl || `https://oms.deepassilverjewellery.co/api/orders/${this.lastID}/invoice?t=${Date.now()}`;
 
             let waLink = "No mobile number";
             if (command.mobile) {
@@ -188,15 +188,14 @@ async function downloadMedia(url) {
     return { buffer, contentType: contentType || 'image/jpeg' };
 }
 
-async function createAndUploadInvoice(order, s3, bucket, region) {
+async function createAndUploadInvoice(order, cloudinaryStore) {
     try {
         const buffer = await generateInvoiceBuffer(order);
         const ts = Date.now();
         const state = order.collectedByCustomerDate ? 'DELIVERED' : 'DRAFT';
         const filename = `invoices/inv_${order.id}_${state}_${ts}.pdf`;
         
-        await s3.send(new PutObjectCommand({
-            Bucket: bucket,
+        await cloudinaryStore.send(new PutObjectCommand({
             Key: filename,
             Body: buffer,
             ACL: "public-read",
@@ -208,12 +207,12 @@ async function createAndUploadInvoice(order, s3, bucket, region) {
         
         return cloudinaryUrlForKey(filename, 'application/pdf');
     } catch (err) {
-        logError('[PDF-S3] Failed to generate/upload:', err);
+        logError('[PDF-CLOUDINARY] Failed to generate/upload:', err);
         return null;
     }
 }
 
-export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
+export const handleTwilioMessage = async (req, res, db, cloudinaryStore) => {
     try {
         const { Body, From, MediaUrl0 } = req.body;
         if (!Body && !MediaUrl0) return res.status(200).send('<Response></Response>');
@@ -258,8 +257,8 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                         let ext = 'jpg';
                         if (contentType === 'image/png') ext = 'png';
                         const filename = `orders/whatsapp_${Date.now()}.${ext}`;
-                        await s3.send(new PutObjectCommand({
-                            Bucket: bucket, Key: filename, Body: buffer, ACL: "public-read", ContentType: contentType
+                        await cloudinaryStore.send(new PutObjectCommand({
+                            Key: filename, Body: buffer, ContentType: contentType
                         }));
                         photoUrl = cloudinaryUrlForKey(filename, contentType);
                         log(`[OCR DELIVERY] Image successfully uploaded to S3: ${photoUrl}`);
@@ -413,8 +412,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
 
                 // 9. Upload to S3
                 const filename = `polki/whatsapp_${Date.now()}.jpg`;
-                await s3.send(new PutObjectCommand({
-                    Bucket: bucket,
+                await cloudinaryStore.send(new PutObjectCommand({
                     Key: filename,
                     Body: processedBuffer,
                     ACL: 'public-read',
@@ -719,8 +717,8 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                     let ext = 'jpg';
                     if (contentType === 'image/png') ext = 'png';
                     const filename = `karigar_repairs/whatsapp_${Date.now()}.${ext}`;
-                    await s3.send(new PutObjectCommand({
-                        Bucket: bucket, Key: filename, Body: buffer, ACL: "public-read", ContentType: contentType
+                    await cloudinaryStore.send(new PutObjectCommand({
+                        Key: filename, Body: buffer, ContentType: contentType
                     }));
                     const photoUrl = cloudinaryUrlForKey(filename, contentType);
 
@@ -781,8 +779,8 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                     let ext = 'jpg';
                     if (contentType === 'image/png') ext = 'png';
                     const filename = `karigar_repairs/whatsapp_${Date.now()}_0.${ext}`;
-                    await s3.send(new PutObjectCommand({
-                        Bucket: bucket, Key: filename, Body: buffer, ACL: "public-read", ContentType: contentType
+                    await cloudinaryStore.send(new PutObjectCommand({
+                        Key: filename, Body: buffer, ContentType: contentType
                     }));
                     const photoUrl = cloudinaryUrlForKey(filename, contentType);
                     session.mediaUrls.push(photoUrl);
@@ -852,8 +850,8 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                     }
 
                     // GENERATE AND UPLOAD S3 PDF
-                    const s3Url = await createAndUploadInvoice(row, s3, bucket, region);
-                    const invoiceUrl = s3Url || `https://oms.deepassilverjewellery.co/api/orders/${orderId}/invoice?t=${Date.now()}`;
+                    const cloudinaryUrl = await createAndUploadInvoice(row, cloudinaryStore);
+                    const invoiceUrl = cloudinaryUrl || `https://oms.deepassilverjewellery.co/api/orders/${orderId}/invoice?t=${Date.now()}`;
                     
                     let waLink = "No mobile number";
                     if (row.mobile) {
@@ -866,7 +864,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                                      `👤 ${row.firstName} ${row.lastName}\n` +
                                      `✅ Status: Delivered (Today)\n\n` +
                                      `👉 *Chat with Customer:*\n${waLink}\n\n` +
-                                     `🔗 *Invoice PDF (S3 Stamped):*\n${invoiceUrl}`;
+                                     `🔗 *Invoice PDF:*\n${invoiceUrl}`;
 
                     log(`[TWILIO] Sending /rc success reply for ID ${orderId} with Media: ${invoiceUrl}`);
                     return sendTwiML(res, bodyText, invoiceUrl);
@@ -891,8 +889,8 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                     return res.send(`<Response><Message>❌ Order #${orderId} not found.</Message></Response>`);
                 }
 
-                const s3Url = await createAndUploadInvoice(row, s3, bucket, region);
-                const invoiceUrl = s3Url || `https://oms.deepassilverjewellery.co/api/orders/${orderId}/invoice?t=${Date.now()}`;
+                const cloudinaryUrl = await createAndUploadInvoice(row, cloudinaryStore);
+                const invoiceUrl = cloudinaryUrl || `https://oms.deepassilverjewellery.co/api/orders/${orderId}/invoice?t=${Date.now()}`;
                 
                 let waLink = "No mobile number";
                 if (row.mobile) {
@@ -904,7 +902,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                 const bodyText = `📄 *Invoice Generated*\n\n` +
                                  `👤 ${row.firstName} ${row.lastName}\n\n` +
                                  `👉 *Chat with Customer:*\n${waLink}\n\n` +
-                                 `🔗 *Download PDF (S3):*\n${invoiceUrl}`;
+                                 `🔗 *Download PDF:*\n${invoiceUrl}`;
 
                 log(`[TWILIO] Sending /generate success reply for ID ${orderId} with Media: ${invoiceUrl}`);
                 return sendTwiML(res, bodyText, invoiceUrl);
@@ -958,8 +956,8 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                     let ext = 'jpg';
                     if (contentType === 'image/png') ext = 'png';
                     const filename = `orders/whatsapp_${Date.now()}_0.${ext}`;
-                    await s3.send(new PutObjectCommand({
-                        Bucket: bucket, Key: filename, Body: buffer, ACL: "public-read", ContentType: contentType
+                    await cloudinaryStore.send(new PutObjectCommand({
+                        Key: filename, Body: buffer, ContentType: contentType
                     }));
                     const photoUrl = cloudinaryUrlForKey(filename, contentType);
                     session.mediaUrls.push(photoUrl);
@@ -988,8 +986,8 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                     let ext = 'jpg';
                     if (contentType === 'image/png') ext = 'png';
                     const filename = `karigar_repairs/whatsapp_${Date.now()}_${karigarSession.mediaUrls.length}.${ext}`;
-                    await s3.send(new PutObjectCommand({
-                        Bucket: bucket, Key: filename, Body: buffer, ACL: "public-read", ContentType: contentType
+                    await cloudinaryStore.send(new PutObjectCommand({
+                        Key: filename, Body: buffer, ContentType: contentType
                     }));
                     const photoUrl = cloudinaryUrlForKey(filename, contentType);
                     karigarSession.mediaUrls.push(photoUrl);
@@ -1061,15 +1059,15 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
             const session = pendingPhotosSession.get(From);
             if (session && MediaUrl0) {
                 try {
-                    // Download and upload this photo to S3
+                    // Download and upload this photo to Cloudinary
                     const { buffer, contentType } = await downloadMedia(MediaUrl0);
                     let ext = 'jpg';
                     if (contentType === 'image/png') ext = 'png';
                     const filename = `orders/whatsapp_${Date.now()}_${session.mediaUrls.length}.${ext}`;
-                    await s3.send(new PutObjectCommand({
-                        Bucket: bucket, Key: filename, Body: buffer, ACL: "public-read", ContentType: contentType
+                    await cloudinaryStore.send(new PutObjectCommand({
+                        Key: filename, Body: buffer, ContentType: contentType
                     }));
-                    const photoUrl = `https://${bucket}.s3.${region}.amazonaws.com/${filename}`;
+                    const photoUrl = cloudinaryUrlForKey(filename, contentType);
                     
                     session.mediaUrls.push(photoUrl);
                     log(`[PHOTOS-SESSION] Collected photo ${session.mediaUrls.length}/${session.expectedPhotos} for ${From}`);
@@ -1084,7 +1082,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                         if (session.command) {
                             log(`[PHOTOS-SESSION] All photos collected and command exists. Executing...`);
                             pendingPhotosSession.delete(From);
-                            setTimeout(() => executeSessionOrder(From, session, db, s3, bucket, region), 0);
+                            setTimeout(() => executeSessionOrder(From, session, db, cloudinaryStore), 0);
                             
                             res.set('Content-Type', 'text/xml');
                             return res.send('<Response></Response>');
@@ -1305,8 +1303,8 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                     let ext = 'jpg';
                     if (contentType === 'image/png') ext = 'png';
                     const filename = `orders/whatsapp_${Date.now()}.${ext}`;
-                    await s3.send(new PutObjectCommand({
-                        Bucket: bucket, Key: filename, Body: buffer, ACL: "public-read", ContentType: contentType
+                    await cloudinaryStore.send(new PutObjectCommand({
+                        Key: filename, Body: buffer, ContentType: contentType
                     }));
                     photoUrl = cloudinaryUrlForKey(filename, contentType);
                 } catch (err) {
@@ -1424,8 +1422,8 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                     type: commandType, karigarName, notes, photoUrl
                 };
 
-                const s3Url = await createAndUploadInvoice(order, s3, bucket, region);
-                invoiceUrl = s3Url || `https://oms.deepassilverjewellery.co/api/orders/${orderId}/invoice?t=${Date.now()}`;
+                const cloudinaryUrl = await createAndUploadInvoice(order, cloudinaryStore);
+                invoiceUrl = cloudinaryUrl || `https://oms.deepassilverjewellery.co/api/orders/${orderId}/invoice?t=${Date.now()}`;
 
                 let waLink = "No mobile number";
                 if (mobile) {

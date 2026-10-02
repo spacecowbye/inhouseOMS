@@ -5,7 +5,7 @@ import { CloudinaryPutObjectCommand } from '../utils/cloudinaryStorage.js';
 import { extractPriceFromImage } from '../utils/ocrUtils.js';
 import { generateSkuId } from '../utils/skuUtils.js';
 
-export default function createInventoryRouter(db, s3, bucket, region) {
+export default function createInventoryRouter(db, cloudinaryStore) {
     const router = express.Router();
     
     // Set up multer memory storage for multipart/form-data uploads
@@ -69,17 +69,16 @@ export default function createInventoryRouter(db, s3, bucket, region) {
                 return res.status(500).json({ error: "Failed to process image file" });
             }
 
-            // 4. Upload to S3
+            // 4. Upload to Cloudinary
             const filename = `polki/manual_${Date.now()}.jpg`;
             const uploadParams = {
-                Bucket: bucket,
                 Key: filename,
                 Body: processedBuffer,
                 ACL: 'public-read',
                 ContentType: 'image/jpeg'
             };
 
-            const uploaded = await s3.send(new CloudinaryPutObjectCommand(uploadParams));
+            const uploaded = await cloudinaryStore.send(new CloudinaryPutObjectCommand(uploadParams));
             const photoUrl = uploaded.secure_url;
 
             // 5. Format parameters

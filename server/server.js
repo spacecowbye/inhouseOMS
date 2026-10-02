@@ -5,7 +5,7 @@ import process from "process"
 import path, { dirname } from "path"
 import fs from "fs"
 import { fileURLToPath } from "url"
-import { createCloudinaryStore, uploadToCloudinary, CloudinaryPutObjectCommand } from './src/utils/cloudinaryStorage.js'
+import { createCloudinaryStore } from './src/utils/cloudinaryStorage.js'
 import multer from 'multer'
 import sharp from "sharp"
 
@@ -97,7 +97,7 @@ const dbPath = path.join(dbDir, "jewelry_orders.db");
 
 
 // --- AWS CONFIGURATION ---
-const s3 = createCloudinaryStore();
+const cloudinaryStore = createCloudinaryStore();
 
 
 // ---- NEW IMAGE UPLOAD CONFIG (HEIC SUPPORT) ----
@@ -269,14 +269,14 @@ const db = new sqlite.Database(dbPath, (err) => {
 });
 
 // --- INVENTORY API ---
-app.use('/api/inventory', createInventoryRouter(db, s3, process.env.S3_BUCKET_NAME, process.env.AWS_REGION));
+app.use('/api/inventory', createInventoryRouter(db, cloudinaryStore));
 
 // --- KARIGAR REPAIRS API ---
-app.use('/api/karigar-repairs', createKarigarRouter(db, s3, process.env.S3_BUCKET_NAME, process.env.AWS_REGION));
+app.use('/api/karigar-repairs', createKarigarRouter(db, cloudinaryStore));
 
 // --- TWILIO WEBHOOK ---
 app.post('/api/whatsapp-webhook', (req, res) => {
-    handleTwilioMessage(req, res, db, s3, process.env.S3_BUCKET_NAME, process.env.AWS_REGION);
+    handleTwilioMessage(req, res, db, cloudinaryStore);
 });
 // ----------------------
 
