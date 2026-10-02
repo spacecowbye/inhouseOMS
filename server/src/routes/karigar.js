@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import sharp from 'sharp';
-import { PutObjectCommand } from '@aws-sdk/client-s3';
+import { CloudinaryPutObjectCommand } from '../utils/cloudinaryStorage.js';
 import { generateKarigarSerialNumber } from '../utils/karigarUtils.js';
 
 export default function createKarigarRouter(db, s3, bucket, region) {
@@ -156,7 +156,7 @@ export default function createKarigarRouter(db, s3, bucket, region) {
                 }
 
                 const filename = `karigar_repairs/${Date.now()}_${i}.jpg`;
-                await s3.send(new PutObjectCommand({
+                const uploaded = await s3.send(new CloudinaryPutObjectCommand({
                     Bucket: bucket,
                     Key: filename,
                     Body: outputBuffer,
@@ -164,7 +164,7 @@ export default function createKarigarRouter(db, s3, bucket, region) {
                     ContentType: contentType
                 }));
 
-                const url = `https://${bucket}.s3.${region}.amazonaws.com/${filename}`;
+                const url = uploaded.secure_url;
                 photoUrls.push(url);
             }
 

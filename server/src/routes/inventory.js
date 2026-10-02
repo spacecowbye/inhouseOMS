@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import sharp from 'sharp';
-import { PutObjectCommand } from '@aws-sdk/client-s3';
+import { CloudinaryPutObjectCommand } from '../utils/cloudinaryStorage.js';
 import { extractPriceFromImage } from '../utils/ocrUtils.js';
 import { generateSkuId } from '../utils/skuUtils.js';
 
@@ -79,8 +79,8 @@ export default function createInventoryRouter(db, s3, bucket, region) {
                 ContentType: 'image/jpeg'
             };
 
-            await s3.send(new PutObjectCommand(uploadParams));
-            const photoUrl = `https://${bucket}.s3.${region}.amazonaws.com/${filename}`;
+            const uploaded = await s3.send(new CloudinaryPutObjectCommand(uploadParams));
+            const photoUrl = uploaded.secure_url;
 
             // 5. Format parameters
             const canSellSeparately = (can_sell_separately === 'true' || can_sell_separately === true || can_sell_separately === '1' || can_sell_separately === 1) ? 1 : 0;

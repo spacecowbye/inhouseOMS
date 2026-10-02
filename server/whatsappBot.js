@@ -1,4 +1,4 @@
-import { PutObjectCommand } from '@aws-sdk/client-s3';
+import { CloudinaryPutObjectCommand as PutObjectCommand, cloudinaryUrlForKey } from './src/utils/cloudinaryStorage.js';
 import twilio from 'twilio';
 import { generateInvoiceBuffer } from './invoiceGenerator.js';
 import sharp from 'sharp';
@@ -206,7 +206,7 @@ async function createAndUploadInvoice(order, s3, bucket, region) {
             ContentDisposition: `inline; filename="invoice_${order.id}.pdf"`
         }));
         
-        return `https://${bucket}.s3.${region}.amazonaws.com/${filename}`;
+        return cloudinaryUrlForKey(filename, 'application/pdf');
     } catch (err) {
         logError('[PDF-S3] Failed to generate/upload:', err);
         return null;
@@ -261,7 +261,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                         await s3.send(new PutObjectCommand({
                             Bucket: bucket, Key: filename, Body: buffer, ACL: "public-read", ContentType: contentType
                         }));
-                        photoUrl = `https://${bucket}.s3.${region}.amazonaws.com/${filename}`;
+                        photoUrl = cloudinaryUrlForKey(filename, contentType);
                         log(`[OCR DELIVERY] Image successfully uploaded to S3: ${photoUrl}`);
                     } catch (uploadErr) {
                         logError('[OCR DELIVERY] Image upload to S3 failed:', uploadErr);
@@ -420,7 +420,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                     ACL: 'public-read',
                     ContentType: 'image/jpeg'
                 }));
-                const photoUrl = `https://${bucket}.s3.${region}.amazonaws.com/${filename}`;
+                const photoUrl = cloudinaryUrlForKey(filename, 'image/jpeg');
 
                 // 10. Generate SKU ID
                 generateSkuId(db, (skuId) => {
@@ -722,7 +722,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                     await s3.send(new PutObjectCommand({
                         Bucket: bucket, Key: filename, Body: buffer, ACL: "public-read", ContentType: contentType
                     }));
-                    const photoUrl = `https://${bucket}.s3.${region}.amazonaws.com/${filename}`;
+                    const photoUrl = cloudinaryUrlForKey(filename, contentType);
 
                     const serialNumber = await generateKarigarSerialNumber(db, karigarName);
                     const sql = `
@@ -784,7 +784,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                     await s3.send(new PutObjectCommand({
                         Bucket: bucket, Key: filename, Body: buffer, ACL: "public-read", ContentType: contentType
                     }));
-                    const photoUrl = `https://${bucket}.s3.${region}.amazonaws.com/${filename}`;
+                    const photoUrl = cloudinaryUrlForKey(filename, contentType);
                     session.mediaUrls.push(photoUrl);
                 } catch (err) {
                     logError('[TWILIO] /kr session initial photo error:', err);
@@ -961,7 +961,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                     await s3.send(new PutObjectCommand({
                         Bucket: bucket, Key: filename, Body: buffer, ACL: "public-read", ContentType: contentType
                     }));
-                    const photoUrl = `https://${bucket}.s3.${region}.amazonaws.com/${filename}`;
+                    const photoUrl = cloudinaryUrlForKey(filename, contentType);
                     session.mediaUrls.push(photoUrl);
                 } catch (err) {
                     logError('[PHOTOS-SESSION] Error uploading initial photo:', err);
@@ -991,7 +991,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                     await s3.send(new PutObjectCommand({
                         Bucket: bucket, Key: filename, Body: buffer, ACL: "public-read", ContentType: contentType
                     }));
-                    const photoUrl = `https://${bucket}.s3.${region}.amazonaws.com/${filename}`;
+                    const photoUrl = cloudinaryUrlForKey(filename, contentType);
                     karigarSession.mediaUrls.push(photoUrl);
 
                     clearTimeout(karigarSession.timer);
@@ -1308,7 +1308,7 @@ export const handleTwilioMessage = async (req, res, db, s3, bucket, region) => {
                     await s3.send(new PutObjectCommand({
                         Bucket: bucket, Key: filename, Body: buffer, ACL: "public-read", ContentType: contentType
                     }));
-                    photoUrl = `https://${bucket}.s3.${region}.amazonaws.com/${filename}`;
+                    photoUrl = cloudinaryUrlForKey(filename, contentType);
                 } catch (err) {
                     logError('[TWILIO] Media upload failed:', err);
                 }

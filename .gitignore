@@ -24,3 +24,7 @@ dist-ssr
 *.sw?
 
 .env
+**/migration.db
+**/*.db-shm
+**/*.db-wal
+*.db

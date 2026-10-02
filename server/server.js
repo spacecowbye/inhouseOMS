@@ -5,7 +5,7 @@ import process from "process"
 import path, { dirname } from "path"
 import fs from "fs"
 import { fileURLToPath } from "url"
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
+import { createCloudinaryStore, uploadToCloudinary, CloudinaryPutObjectCommand } from './src/utils/cloudinaryStorage.js'
 import multer from 'multer'
 import sharp from "sharp"
 
@@ -97,13 +97,7 @@ const dbPath = path.join(dbDir, "jewelry_orders.db");
 
 
 // --- AWS CONFIGURATION ---
-const s3 = new S3Client({
-    region: process.env.AWS_REGION,
-    credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-    }
-});
+const s3 = createCloudinaryStore();
 
 
 // ---- NEW IMAGE UPLOAD CONFIG (HEIC SUPPORT) ----
@@ -306,17 +300,14 @@ app.post('/api/orders/upload-photo', upload.single('photo'), async (req, res) =>
 
         const filename = `orders/${Date.now()}.${finalExtension}`;
 
-        await s3.send(new PutObjectCommand({
-            Bucket: process.env.S3_BUCKET_NAME,
-            Key: filename,
-            Body: outputBuffer,
-            ACL: "public-read",
-            ContentType: "image/jpeg"
-        }));
+        const result = await uploadToCloudinary({
+            key: filename,
+            body: outputBuffer,
+            contentType: "image/jpeg"
+        });
+        const publicUrl = result.secure_url;
 
-        const publicUrl = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${filename}`;
-
-        console.log(`[INFO] Image uploaded to S3: ${publicUrl}`);
+        console.log(`[INFO] Image uploaded to Cloudinary: ${publicUrl}`);
 
         res.json({
             status: "success",
