@@ -24,6 +24,8 @@ export function uploadToCloudinary({ key, body, contentType }) {
         const upload = cloudinary.uploader.upload_stream({
             public_id: publicId,
             resource_type: type,
+            type: 'upload',
+            access_mode: 'public',
             overwrite: false,
             unique_filename: false,
             use_filename: false
