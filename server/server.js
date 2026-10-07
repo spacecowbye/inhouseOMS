@@ -626,7 +626,7 @@ app.get('/api/orders', (req, res) => {
         
         const dataSql = `
             SELECT * FROM orders 
-            ORDER BY ${sortBy} ${sortDirection}
+            ORDER BY ${sortBy} ${sortDirection}${sortBy !== 'id' ? `, id ${sortDirection}` : ''}
         `;
 
         db.all(dataSql, [], (err, rows) => { 
