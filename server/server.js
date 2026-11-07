@@ -520,6 +520,118 @@ const trackMahavir = async (awb) => {
     }
 };
 
+const trackTrackon = async (awb) => {
+    try {
+        log(`[INFO] Attempting Trackon Tracking for AWB: ${awb}`);
+        const trackonRes = await fetch('https://www.trackon.in/courier-tracking', {
+            method: 'POST',
+            headers: {
+                'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                'accept-language': 'en-US,en;q=0.9',
+                'cache-control': 'no-cache',
+                'content-type': 'application/x-www-form-urlencoded',
+                'origin': 'https://www.trackon.in',
+                'pragma': 'no-cache',
+                'referer': 'https://www.trackon.in/courier-tracking',
+                'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36'
+            },
+            body: `awbSingleTrackingId=${encodeURIComponent(awb.trim())}`
+        });
+
+        if (!trackonRes.ok) {
+            log(`[WARN] Trackon response status: ${trackonRes.status}`);
+            return null;
+        }
+
+        const trackonHtml = await trackonRes.text();
+
+        // If Trackon returned "no tracking info available"
+        if (trackonHtml.includes('No tracking information is available')) {
+            log(`[INFO] Trackon reported no tracking info available for AWB: ${awb}`);
+            return null;
+        }
+
+        // Match table (new modern .trk-table or legacy .table-hightlight)
+        const trkTableMatch = trackonHtml.match(/<table[^>]*class="[^"]*trk-table[^"]*"[^>]*>[\s\S]*?<\/table>/i);
+        const legacyTableMatch = trackonHtml.match(/<table[^>]*class="[^"]*table-hightlight[^"]*"[^>]*>[\s\S]*?<\/table>/i);
+        const tableMatch = trkTableMatch || legacyTableMatch;
+
+        if (!tableMatch) {
+            log(`[INFO] No tracking table found in Trackon HTML for AWB: ${awb}`);
+            return null;
+        }
+
+        // Extract status
+        const cardMatch = trackonHtml.match(/<div[^>]*class="[^"]*track-result-card[^"]*"[^>]*>/i);
+        let status = '';
+        if (cardMatch) {
+            const statusAttr = cardMatch[0].match(/data-status="([^"]*)"/i);
+            if (statusAttr && statusAttr[1]) status = statusAttr[1].trim();
+        }
+        if (!status) {
+            const currentMatch = trackonHtml.match(/class="trk-current"[^>]*>([^<]+)/i);
+            if (currentMatch && currentMatch[1]) status = currentMatch[1].trim();
+        }
+
+        // Extract Due Date
+        let dueDate = null;
+        if (cardMatch) {
+            const dueAttr = cardMatch[0].match(/data-due="([^"]*)"/i);
+            if (dueAttr && dueAttr[1]) dueDate = dueAttr[1].trim();
+        }
+        if (!dueDate) {
+            const dueMatch = trackonHtml.match(/(?:DueDate|Expected)\s*:\s*(\d{2}\/\d{2}\/\d{4})/i);
+            if (dueMatch && dueMatch[1]) dueDate = dueMatch[1];
+        }
+
+        // Extract POD URL if present
+        let podUrl = null;
+        const podMatch = trackonHtml.match(/data-img="([^"]+)"/i);
+        if (podMatch && podMatch[1]) {
+            podUrl = podMatch[1];
+        }
+
+        let cleanTable = tableMatch[0];
+        cleanTable = cleanTable.replace(/\/assets\/images\//g, 'https://www.trackon.in/assets/images/');
+        cleanTable = cleanTable.replace(/onclick="[^"]*"/g, '');
+        cleanTable = cleanTable.replace(/href="#BModel"/g, 'href="#" style="pointer-events: none; text-decoration: none; color: inherit;"');
+        cleanTable = cleanTable.replace(/<button[^>]*class="[^"]*trk-loc[^"]*"[^>]*>(.*?)<\/button>/gi, '<span class="trk-loc">$1</span>');
+
+        const resultHtml = `
+            <div class="trackon-tracking p-4 bg-white rounded shadow-sm">
+                <div class="flex items-center justify-between mb-4 border-b pb-3 flex-wrap gap-2">
+                    <div class="flex items-center gap-2">
+                        <span class="inline-block w-3 h-3 rounded-full bg-orange-500"></span>
+                        <h3 class="font-bold text-lg text-orange-600">Trackon Courier</h3>
+                        <span class="text-xs text-gray-500 font-mono font-medium">(${awb})</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        ${status ? `<span class="px-2.5 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">${status}</span>` : ''}
+                        ${podUrl ? `<a href="${podUrl}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-900 hover:bg-black text-white text-xs font-semibold rounded shadow transition">📄 View POD</a>` : ''}
+                    </div>
+                </div>
+
+                <div class="overflow-x-auto">
+                    ${cleanTable}
+                </div>
+
+                <style>
+                    .trackon-tracking table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; color: #374151; }
+                    .trackon-tracking th { background: #f97316; color: #ffffff; text-align: left; padding: 10px 12px; font-weight: 600; border: 1px solid #ea580c; }
+                    .trackon-tracking td { padding: 10px 12px; border: 1px solid #e5e7eb; vertical-align: top; }
+                    .trackon-tracking tr:nth-child(even) { background-color: #f9fafb; }
+                    .trackon-tracking .trk-loc { color: #c2410c; font-weight: 500; cursor: default; background: none; border: none; padding: 0; text-align: left; font-size: inherit; }
+                </style>
+            </div>
+        `;
+
+        return { html: resultHtml, dueDate };
+    } catch (e) {
+        logError('[TRACKON ERROR]', e);
+        return null;
+    }
+};
+
 app.post('/api/track-order', async (req, res) => {
     const { awb } = req.body;
     if (!awb) return res.status(400).json({ status: 'error', message: 'AWB required' });
@@ -534,45 +646,13 @@ app.post('/api/track-order', async (req, res) => {
         }
         
         // 1. Try Trackon first
-        const trackonRes = await fetch('https://www.trackon.in/courier-tracking', {
-            method: 'POST',
-            headers: {
-                'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-                'accept-language': 'en-US,en;q=0.9',
-                'content-type': 'application/x-www-form-urlencoded',
-                'origin': 'https://www.trackon.in',
-                'referer': 'https://www.trackon.in/courier-tracking',
-                'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            },
-            body: `awbSingleTrackingId=${awb}&submit=Submit`
-        });
-
-        const trackonHtml = await trackonRes.text();
-        const tableMatch = trackonHtml.match(/<table[^>]*class="[^"]*table-hightlight[^"]*"[^>]*>[\s\S]*?<\/table>/i);
-        
-        if (tableMatch) {
-            let cleanHtml = tableMatch[0];
-            cleanHtml = cleanHtml.replace(/\/assets\/images\//g, 'https://www.trackon.in/assets/images/');
-            cleanHtml = cleanHtml.replace(/onclick="[^"]*"/g, '');
-            cleanHtml = cleanHtml.replace(/href="#BModel"/g, 'href="#" style="pointer-events: none; text-decoration: none; color: inherit;"');
-            
-            // Extract DueDate if present
-            const dueDateMatch = trackonHtml.match(/DueDate\s*:\s*(\d{2}\/\d{2}\/\d{4})/i);
-            if (dueDateMatch) {
-                const dueDate = dueDateMatch[1];
-                res.setHeader('X-Due-Date', dueDate);
-                console.log(`[INFO] Scraped DueDate for Trackon AWB ${awb}: ${dueDate}`);
+        const trackonResult = await trackTrackon(awb);
+        if (trackonResult) {
+            if (trackonResult.dueDate) {
+                res.setHeader('X-Due-Date', trackonResult.dueDate);
+                console.log(`[INFO] Scraped DueDate for Trackon AWB ${awb}: ${trackonResult.dueDate}`);
             }
-
-            const hideCss = `
-                <style>
-                    table.footable tr > *:nth-child(2), 
-                    table.footable tr > *:nth-child(4) { 
-                        display: none !important; 
-                    }
-                </style>
-            `;
-            return res.send(hideCss + cleanHtml);
+            return res.send(trackonResult.html);
         }
 
         // 2. If Trackon fails, try Mahavir
